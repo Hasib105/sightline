@@ -294,11 +294,24 @@ class ApiV1DispatchView(SessionlessAPIView):
             exam = ExamSession.objects.filter(id=exam_id).first()
             if not exam:
                 return Response({"detail": "Exam not found."}, status=status.HTTP_404_NOT_FOUND)
-            data = dict(request.data)
-            data["exam_session"] = exam.id
-            serializer = serializers.ExamAttemptSerializer(data=data, context={"request": request})
-            serializer.is_valid(raise_exception=True)
-            attempt = serializer.save()
+            student = serializers.student_for_user(django_user(request))
+            if not student:
+                return Response({"detail": "Student profile not found."}, status=status.HTTP_400_BAD_REQUEST)
+            if not CourseEnrollment.objects.filter(
+                course=exam.course,
+                student=student,
+                status=CourseEnrollment.STATUS_ACTIVE,
+            ).exists():
+                return Response({"detail": "Enroll in this course before submitting the exam."}, status=status.HTTP_403_FORBIDDEN)
+            attempt, _ = ExamAttempt.objects.update_or_create(
+                exam_session=exam,
+                student=student,
+                defaults={
+                    "answers": request.data.get("answers") or {},
+                    "status": ExamAttempt.STATUS_SUBMITTED,
+                    "submitted_at": timezone.now(),
+                },
+            )
             return Response(serializers.ExamAttemptSerializer(attempt).data, status=status.HTTP_201_CREATED)
 
         if clean_path == "exam-attempts" and request.method == "GET":

@@ -502,6 +502,63 @@ export interface ContentPostListResponse {
   posts: ContentPost[];
 }
 
+export interface CourseSummary {
+  id: number;
+  code: string;
+  title: string;
+  teacher: number | null;
+  teacher_username: string | null;
+  department: number;
+  department_code: string;
+  semester: number;
+  semester_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CourseEnrollment {
+  id: number;
+  course: number;
+  course_code: string;
+  course_title: string;
+  student: number;
+  student_number: string;
+  student_name: string;
+  status: "active" | "dropped" | "completed";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExamSessionSummary {
+  id: number;
+  course: number;
+  course_code: string;
+  course_title: string;
+  hall: number;
+  hall_name: string;
+  starts_at: string;
+  ends_at: string;
+  status: "scheduled" | "prepared" | "live" | "completed" | "cancelled";
+  quiz_title: string;
+  quiz_instructions: string;
+  quiz_questions: JsonValue[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExamAttemptSummary {
+  id: number;
+  exam_session: number;
+  course_code: string;
+  student: number;
+  student_number: string;
+  status: "started" | "submitted" | "reviewed";
+  answers: Record<string, JsonValue>;
+  submitted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AdminAnalyticsCard {
   key: string;
   label: string;

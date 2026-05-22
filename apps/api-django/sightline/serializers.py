@@ -316,6 +316,9 @@ class ExamSessionSerializer(serializers.ModelSerializer):
             "starts_at",
             "ends_at",
             "status",
+            "quiz_title",
+            "quiz_instructions",
+            "quiz_questions",
             "created_at",
             "updated_at",
         ]

@@ -14,9 +14,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowUpRight,
   Bell,
+  BookOpenCheck,
   CheckCheck,
   ChevronDown,
   ChevronLeft,
+  ClipboardList,
   Command,
   Home,
   LayoutDashboard,
@@ -80,6 +82,8 @@ const sidebarTransitionClass =
 
 const routeLabels: Record<string, string> = {
   "/dashboard": "Overview",
+  "/dashboard/courses": "Courses",
+  "/dashboard/exams": "Exams",
   "/dashboard/playground": "Playground",
   "/dashboard/api-keys": "API Keys",
   "/dashboard/docs": "Docs",
@@ -165,6 +169,16 @@ function navigationFor(kind: ShellKind, user: CurrentUser): ShellSection[] {
     sections.push({
       label: "Admin",
       items: [{ href: "/admin", icon: ArrowUpRight, label: "Open Admin Console", match: "prefix" }],
+    });
+  }
+
+  if (user.role === "student") {
+    sections.push({
+      label: "Student",
+      items: [
+        { href: "/dashboard/courses", icon: BookOpenCheck, label: "Enroll Courses" },
+        { href: "/dashboard/exams", icon: ClipboardList, label: "Give Exams" },
+      ],
     });
   }
 

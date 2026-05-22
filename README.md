@@ -1,47 +1,57 @@
 # Sightline
 
-Sightline is an MVP for exam-integrity review.
+Sightline is an MVP for exam-integrity review and academic risk support.
 
-The current MVP is intentionally small: a teacher uploads an exam video, Sightline analyzes it, and an invigilator reviews evidence-backed alerts. There is no CCTV or live camera requirement for MVP.
+The first build is intentionally small: admin setup, teacher course/exam workflows, student enrollment/exam submission, invigilator uploaded-video review, and teacher at-risk student identification.
+
+## MVP Roles
+
+- Admin manages everything through Django admin and admin APIs.
+- Teacher creates courses, creates exams, uploads course material if needed, and identifies academically at-risk students before the semester ends.
+- Invigilator uploads exam videos and monitors/reviews and alerts exam evidence.
+- Student enrolls in courses and gives/submits exams.
 
 ## MVP Scope
 
 ### In scope now
 
-- video upload for an exam session
-- asynchronous video analysis
+- password login
+- four roles: `admin`, `teacher`, `student`, `invigilator`
+- Django admin and admin APIs for platform management
+- teacher course and exam creation
+- optional course-material upload
+- student course enrollment
+- student exam attempt/submission
+- uploaded exam-video analysis
 - suspicious-event alerts with timestamps, confidence, and evidence references
 - invigilator review actions: confirm, dismiss, or follow up
-- simple admin setup for users, courses, halls, and exams
-- four roles: `admin`, `teacher`, `student`, `invigilator`
+- teacher at-risk student view before semester end
 
-### Out of scope for MVP
+### Out of scope for first build
 
 - live CCTV or RTSP camera monitoring
 - automated cheating verdicts
 - disciplinary automation
-- broad academic analytics
-- student reminder workflows
 - full LMS/SIS integrations
+- full custom admin frontend
+- mobile app
 
-## Later Feature: ProcBot
+## Additional Requirement: ProcBot
 
-ProcBot is a future browser-monitoring pipeline for online quizzes. It is not part of the first MVP.
+ProcBot is the browser-monitoring pipeline for BLC quizzes.
 
 ```mermaid
-flowchart LR
+flowchart TD
   A[Student Opens BLC Quiz] --> B[ProcBot Extension Activates]
   B --> C[Tab Visibility API]
-  B --> D[Webcam Face Detection]
+  B --> D[Webcam MediaPipe @ 1fps]
   B --> E[Event Logger]
-  C --> F[Anomaly Classified]
+  C --> F[Anomaly Classified: TabSwitch / FaceGone / MultiPerson / Phone]
   D --> F
   E --> F
-  F --> G[WebSocket Event To FastAPI]
-  G --> H[Dashboard Alert With Evidence Screenshot]
+  F --> G[WebSocket Event -> FastAPI]
+  G --> H[Dashboard Alert with Evidence Screenshot]
 ```
-
-Detection cadence:
 
 | Detection | Method | Cost | Cadence |
 | --- | --- | --- | --- |
@@ -50,20 +60,28 @@ Detection cadence:
 | MultiPerson | MediaPipe Face Detector | Low | Every 5 sec |
 | Phone | ONNX/WebGPU tiny model | Medium | Every 15-20 sec |
 
+Cadence:
+
+- Realtime: tab switch only.
+- Every 5 sec: face detection and multi-person detection.
+- Every 15-20 sec: phone detection.
+
 ## Architecture
 
 ```mermaid
 flowchart LR
   WEB[Next.js Web App] --> API[Django API]
-  WEB --> WS[Django Channels]
+  WEB --> ADMIN[Django Admin]
   API --> DB[(SQLite or PostgreSQL)]
   API --> CEL[Celery Worker]
   CEL --> INF[Video Analysis Worker]
   INF --> OBJ[(Evidence Files)]
-  WS --> WEB
+  PB[ProcBot Extension] --> FAST[FastAPI / WebSocket Gateway]
+  FAST --> API
+  FAST --> WEB
 ```
 
-For local development, SQLite is enough. PostgreSQL, Redis, and object storage remain deployment options.
+For local development, SQLite is enough. PostgreSQL, Redis, object storage, and a FastAPI/WebSocket gateway remain deployment options.
 
 ## Repository Layout
 
@@ -118,4 +136,5 @@ Demo users all use password `sightline`:
 
 ## Current Implementation Notes
 
-The codebase still contains some prototype tables and endpoints from the earlier larger platform. Treat the docs in `docs/product` as the MVP source of truth: build the upload-analysis-review workflow first, then add ProcBot or live monitoring only after the MVP is stable.
+The codebase still contains some prototype tables and endpoints from an earlier larger platform. Treat the docs in `docs/product` as the source of truth for the current MVP.
+

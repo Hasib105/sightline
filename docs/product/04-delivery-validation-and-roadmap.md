@@ -1,238 +1,137 @@
-# Sightline Phase 1 - Delivery, Validation And Roadmap
+# Sightline MVP - Delivery, Validation And Roadmap
 
-## 1) Purpose
+## 1) Delivery Strategy
 
-This document turns the PRD, domain model, and architecture into an implementation-facing delivery plan with milestone slices, validation scenarios, and correctness checks.
+Build the smallest complete product first:
 
-It is intentionally phase-1 focused.
+1. auth, roles, seed data, and Django admin setup
+2. teacher course and exam workflows
+3. student enrollment and exam submission
+4. invigilator video upload and alert/evidence review
+5. teacher at-risk student view
+6. ProcBot browser monitoring after the core MVP is stable
 
-## 2) Delivery Strategy
+## 2) Milestones
 
-Build phase 1 in vertical slices that prove user value early while preserving the shared platform foundation:
-
-1. platform foundations and access control
-2. exam monitoring and alert review
-3. faculty risk analytics
-4. student schedule and reminder portal
-5. trust, operability, and admin hardening
-
-This sequence keeps the primary product value visible early while still delivering the add-on modules in the same release train.
-
-## 3) Milestones
-
-### Milestone 1: Platform Foundations And Access Control
+### Milestone 1: Roles And Admin
 
 **Outcome**
 
-- Users, roles, departments, courses, semesters, and shared navigation exist.
-- The product has a common data model for all three modules.
-- Admin users can begin configuring core academic and operational data.
-
-**Includes**
-
-- Django project and module boundaries
-- React app shell and role-based navigation
-- authentication and authorization
-- shared domain models
-- audit trail scaffolding
-- hall, camera, user, course, and semester setup surfaces
+- Four roles exist: `admin`, `teacher`, `invigilator`, `student`.
+- Seed data creates 1 admin, 3 invigilators, 5 teachers, and 20 students.
+- Admin can manage everything through Django admin and admin APIs.
 
 **Acceptance gate**
 
-- a user can sign in, land on the correct role-based surface, and access only the module data allowed for that role
+- A seeded admin can log in and manage users/domain records.
 
-### Milestone 2: Exam Monitoring And Alert Review
+### Milestone 2: Teacher Courses And Exams
 
 **Outcome**
 
-- Invigilators can receive live alerts for supported behaviors.
-- Supervisors can inspect evidence and record review actions.
-
-**Includes**
-
-- inference worker skeleton and stream input handling
-- supported suspicious-behavior detection pipeline
-- alert persistence and live WebSocket updates
-- alert dashboard
-- alert detail view with evidence
-- reviewer decision workflow
-- camera and exam session state
+- Teacher can create courses.
+- Teacher can create exams for their courses.
+- Teacher can optionally upload course material later if needed.
 
 **Acceptance gate**
 
-- an invigilator can receive, open, and review a live alert with enough context to decide what to do next
+- A seeded teacher can create a course and exam without admin help.
 
-### Milestone 3: Faculty Risk Analytics
+### Milestone 3: Student Enrollment And Exam Submission
 
 **Outcome**
 
-- Faculty and department heads can upload academic data and review at-risk students.
-
-**Includes**
-
-- attendance and assessment import flow
-- import validation reporting
-- risk calculation worker
-- student-level risk view
-- course and department summary views
-- interpretable factor display
+- Student can enroll in a course.
+- Student can give/submit an exam.
 
 **Acceptance gate**
 
-- a faculty user can upload valid data and see ranked or classified at-risk students with understandable contributing factors
+- A seeded student can enroll and submit an exam attempt for an available exam.
 
-### Milestone 4: Student Schedule And Reminder Portal
+### Milestone 4: Invigilator Video Upload And Review
 
 **Outcome**
 
-- Students can view class and exam schedules together and receive reminders.
-
-**Includes**
-
-- class schedule management
-- exam schedule management
-- merged agenda view
-- reminder rule configuration
-- in-app reminder display
-- email reminder delivery
+- Invigilator can upload an exam video.
+- Video analysis can create alert/evidence records.
+- Invigilator can monitor/review alerts and exam evidence.
 
 **Acceptance gate**
 
-- a student can open one portal, see upcoming classes and exams, and receive at least one valid reminder through supported channels
+- A seeded invigilator can upload a video and review at least one alert/evidence record.
 
-### Milestone 5: Trust, Operability, And Admin Hardening
+### Milestone 5: Teacher At-Risk Student Support
 
 **Outcome**
 
-- Operators can understand degraded state before users lose trust.
-- Product trust boundaries are visible and auditable.
-
-**Includes**
-
-- camera health visibility
-- inference and worker degraded-state views
-- import run history
-- reminder delivery history
-- audit reports for alert reviews and admin changes
-- stale or missing data messaging across the product
+- Teacher can identify academically at-risk students before the semester ends.
+- Risk output is scoped to course context and includes contributing factors where available.
 
 **Acceptance gate**
 
-- admin and operator users can identify degraded cameras, failed workers, import problems, and reminder issues without reading raw infrastructure logs
+- A seeded teacher can open or run risk analysis and see student-level results.
 
-## 4) Implementation Workstreams
+### Milestone 6: ProcBot Browser Monitoring
 
-| Workstream | What It Produces |
+**Outcome**
+
+- ProcBot activates when a student opens a BLC quiz.
+- Tab switch is detected in realtime.
+- FaceGone and MultiPerson checks run every 5 seconds.
+- Phone detection runs every 15-20 seconds.
+- Anomalies create WebSocket events to FastAPI and dashboard alerts with evidence screenshots.
+
+**Acceptance gate**
+
+- A simulated browser anomaly creates a dashboard alert with the expected detection type and evidence screenshot.
+
+## 3) Validation Scenarios
+
+- Admin creates or updates a user role through Django admin.
+- Teacher creates a course.
+- Teacher creates an exam for that course.
+- Student enrolls in the course.
+- Student submits an exam attempt.
+- Invigilator uploads an exam video for the exam session.
+- An alert appears with evidence for invigilator review.
+- Invigilator confirms, dismisses, or marks the alert for follow-up.
+- Teacher views at-risk students for a course.
+- ProcBot TabSwitch event appears in realtime.
+- ProcBot FaceGone and MultiPerson checks run every 5 seconds.
+- ProcBot Phone checks run every 15-20 seconds.
+
+## 4) Correctness Checks
+
+| ID | Check |
 | --- | --- |
-| Web app | role-based React surfaces for invigilators, faculty, students, and operators |
-| Django control plane | REST APIs, WebSocket orchestration, permissions, audit state, shared product logic |
-| Integrity monitoring | hall and camera configuration, alert state, evidence references, reviewer workflows |
-| Inference runtime | live stream ingestion, behavior detection, event emission, evidence extraction |
-| Analytics pipeline | imports, validation, risk scoring, summary and drill-down views |
-| Scheduling and reminders | merged agenda state, reminder generation, notification delivery |
-| Shared platform | users, roles, departments, courses, semesters, notifications, health states |
-| Trust and operability | degraded-state visibility, auditability, duplicate control, product messaging around uncertainty |
+| VC-01 | Admin-only APIs reject non-admin users. |
+| VC-02 | Teacher cannot manage another teacher's course unless admin. |
+| VC-03 | Student cannot submit another student's exam attempt. |
+| VC-04 | Invigilator can upload videos and review alerts but cannot make disciplinary verdicts. |
+| VC-05 | Alert evidence remains linked after review actions. |
+| VC-06 | Risk output is scoped to a course and remains interpretable. |
+| VC-07 | ProcBot uses realtime checks only for TabSwitch. |
+| VC-08 | ProcBot runs phone detection less frequently than face detection. |
 
-## 5) Validation Scenarios
+## 5) What The MVP Is Not
 
-### Product validation
+- not a full LMS
+- not a complete SIS
+- not a disciplinary automation system
+- not live CCTV monitoring
+- not a large custom admin frontend
+- not a mobile app
+- not a guarantee that every suspicious behavior is detectable
 
-- An invigilator receives a live suspicious-behavior alert during an active exam.
-- The invigilator opens the alert and sees the event type, timestamp, hall context, and evidence.
-- The invigilator records a review decision and the updated state remains visible.
-- A faculty user uploads attendance and marks, then sees interpretable at-risk outputs.
-- A department head drills down from a summary view into specific students and factors.
-- A student sees merged class and exam schedules in one agenda view.
-- A student receives a reminder for an upcoming class or exam.
+## 6) Demo Sequence
 
-### System validation
+1. Log in as admin and show Django admin/API management.
+2. Log in as teacher and create a course.
+3. Create an exam for that course.
+4. Log in as student and enroll in the course.
+5. Submit an exam attempt.
+6. Log in as invigilator and upload an exam video.
+7. Review an alert with evidence.
+8. Return to teacher and show at-risk student output.
+9. Demonstrate or simulate ProcBot browser anomaly flow.
 
-- The inference worker can create one visible alert from one supported suspicious event window.
-- Evidence clips and snapshots are accessible and tied to the alert that references them.
-- Import validation rejects malformed files and preserves visible error reporting.
-- Risk scoring runs can be retried without corrupting prior results.
-- Reminder generation avoids duplicate notifications for the same event and window.
-- WebSocket updates reach active dashboards without requiring manual refresh.
-
-### Trust validation
-
-- The product never presents suspicious alerts as autonomous disciplinary decisions.
-- The analytics module never presents risk output without visible contributing factors.
-- Degraded camera or inference state is visible to operators.
-- Missing or stale schedule data is communicated honestly to students and admins.
-- Role boundaries hold correctly across invigilator, faculty, student, and operator surfaces.
-
-## 6) Correctness Checks
-
-| ID | Check | What It Validates |
-| --- | --- | --- |
-| VC-01 | One suspicious event produces one canonical visible alert | alert deduplication |
-| VC-02 | Alert evidence remains linked to the alert after review actions | evidence correctness |
-| VC-03 | Reviewer decisions remain durable after page reloads and later audits | audit correctness |
-| VC-04 | One valid import run produces one coherent scoped risk result set | analytics consistency |
-| VC-05 | Invalid or unmatched academic records do not silently alter risk outputs | import correctness |
-| VC-06 | One schedule event and reminder window generates one notification event per user | reminder idempotency |
-| VC-07 | Degraded cameras or workers appear in operator views | health visibility correctness |
-| VC-08 | Role-based access prevents cross-role data leakage | access-control correctness |
-
-## 7) What Phase 1 Is Not
-
-Phase 1 is not:
-
-- an autonomous cheating judgment engine
-- an automated disciplinary workflow
-- a full student information system
-- a complete intervention case-management platform
-- a mobile app requirement
-- a universal messaging platform with SMS and push in scope
-- a guarantee that every suspicious real-world behavior is detectable from every camera angle
-
-This matters because implementation should not quietly expand phase 1 into a much larger academic platform before the core workflows are reliable.
-
-## 8) Phase-2 Hooks
-
-Keep these extension points visible, but not required in phase 1:
-
-- SIS and LMS integrations
-- richer behavior models and temporal classifiers
-- more supported suspicious behaviors
-- SMS and push reminders
-- intervention workflow tracking for faculty actions
-- continuous model retraining from reviewed alert data
-- richer analytics maturity based on semester-end outcomes
-
-## 9) Recommended Planning Breakdown
-
-The implementation backlog should be organized around:
-
-1. shared platform and access control
-2. integrity monitoring and alert review
-3. analytics imports and risk views
-4. schedule and reminder workflows
-5. trust, health visibility, and audit hardening
-
-That breakdown maps cleanly to the doc package and avoids mixing product behavior with infrastructure concerns too early.
-
-## 10) Demo Sequence
-
-Use this order for stakeholder demos:
-
-1. sign in as an operator and show hall, camera, and exam setup
-2. show a live or simulated suspicious-behavior alert arriving in the invigilator dashboard
-3. open the alert and review its evidence and decision flow
-4. upload attendance and assessment data as faculty
-5. show at-risk outputs for a course and drill down into a student
-6. switch to a student view and show the merged agenda and reminder visibility
-7. return to the operator view and show degraded-state or processing-health visibility
-
-## 11) Definition Of Done For The Doc Package
-
-The package is implementation-ready when:
-
-- a developer can infer phase-1 scope without relying on external research notes
-- every major user story is non-technical and user-outcome driven
-- every major user story maps to verifiable EARS-style requirements
-- workflows, domain entities, and invariants are consistent across the four docs
-- the architecture clearly reflects `Django + React/Vite + Channels + Celery + Redis + PostgreSQL + inference worker`
-- Mermaid diagrams clarify the product and system model rather than restating prose
-- engineering can break the package into tasks without inventing hidden business rules

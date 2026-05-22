@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { ShieldCheck, UsersRound, Video } from "lucide-react";
 
 import { ConsolePage, ConsolePanel, ConsoleStat } from "@/components/dashboard/console";
+import { StudentDashboard } from "@/app/dashboard/student-dashboard";
 import { getCurrentUser } from "@/lib/auth-server";
 
 export const metadata: Metadata = {
@@ -14,6 +15,10 @@ export default async function DashboardPage() {
   const user = await getCurrentUser();
   if (!user) {
     redirect("/login");
+  }
+
+  if (user.role === "student") {
+    return <StudentDashboard user={user} />;
   }
 
   return (

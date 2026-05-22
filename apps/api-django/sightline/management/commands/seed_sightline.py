@@ -172,12 +172,61 @@ class Command(BaseCommand):
             starts_at=now - timezone.timedelta(minutes=20),
             defaults={"ends_at": now + timezone.timedelta(minutes=100), "status": ExamSession.STATUS_LIVE},
         )
-        ExamSession.objects.get_or_create(
+        live_exam.quiz_title = "Secure Browser Demo Quiz"
+        live_exam.quiz_instructions = "Answer each question and submit the monitored attempt."
+        live_exam.quiz_questions = [
+            {
+                "id": "q1",
+                "kind": "single_choice",
+                "prompt": "Which browser API can detect whether the quiz tab is no longer visible?",
+                "options": ["Clipboard API", "Tab Visibility API", "Notification API", "Web Speech API"],
+            },
+            {
+                "id": "q2",
+                "kind": "single_choice",
+                "prompt": "Which monitoring cadence does this ProcBot demo use?",
+                "options": [
+                    "Tab switch realtime, face every 5 seconds, phone every 17 seconds",
+                    "Everything runs every 1 second",
+                    "Face and phone detection run only on submit",
+                    "Manual instructor review only",
+                ],
+            },
+            {
+                "id": "q3",
+                "kind": "single_choice",
+                "prompt": "A webcam sample reports zero faces for several checks. Which anomaly should be classified?",
+                "options": ["TabSwitch", "MultiPerson", "FaceGone", "NetworkIdle"],
+            },
+            {
+                "id": "q4",
+                "kind": "short_answer",
+                "prompt": "Describe why evidence screenshots help an instructor review alerts.",
+            },
+        ]
+        live_exam.save(update_fields=["quiz_title", "quiz_instructions", "quiz_questions", "updated_at"])
+        database_exam, _ = ExamSession.objects.get_or_create(
             course=databases,
             hall=hall_b,
             starts_at=now + timezone.timedelta(days=2),
             defaults={"ends_at": now + timezone.timedelta(days=2, hours=2), "status": ExamSession.STATUS_PREPARED},
         )
+        database_exam.quiz_title = "Database Systems Quiz"
+        database_exam.quiz_instructions = "Teacher-created sample quiz for enrolled students."
+        database_exam.quiz_questions = [
+            {
+                "id": "q1",
+                "kind": "single_choice",
+                "prompt": "Which SQL clause filters grouped rows after aggregation?",
+                "options": ["WHERE", "HAVING", "ORDER BY", "JOIN"],
+            },
+            {
+                "id": "q2",
+                "kind": "short_answer",
+                "prompt": "Explain one reason database indexes can improve query performance.",
+            },
+        ]
+        database_exam.save(update_fields=["quiz_title", "quiz_instructions", "quiz_questions", "updated_at"])
 
         student_rows = []
         for index in range(1, 21):

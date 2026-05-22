@@ -1,7 +1,7 @@
 from django.core.management import call_command
 from django.test import Client, TestCase
 
-from .models import NotificationEvent
+from .models import ExamAttempt, ExamSession, NotificationEvent
 
 
 class SightlineApiSmokeTests(TestCase):
@@ -49,3 +49,34 @@ class SightlineApiSmokeTests(TestCase):
         self.assertEqual(second.json()["created"], 0)
         self.assertEqual(NotificationEvent.objects.count(), NotificationEvent.objects.values("idempotency_key").distinct().count())
 
+    def test_student_can_submit_enrolled_exam_and_update_attempt(self):
+        self.assertTrue(self.client.login(username="student", password="sightline"))
+        exam = ExamSession.objects.get(course__code="CSE-321")
+
+        first = self.client.post(
+            f"/api/v1/exams/{exam.id}/attempt",
+            data={"answers": {"q1": "Tab Visibility API"}},
+            content_type="application/json",
+        )
+        second = self.client.post(
+            f"/api/v1/exams/{exam.id}/attempt",
+            data={"answers": {"q1": "Updated answer"}},
+            content_type="application/json",
+        )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 201)
+        self.assertEqual(ExamAttempt.objects.filter(exam_session=exam).count(), 1)
+        self.assertEqual(ExamAttempt.objects.get(exam_session=exam).answers["q1"], "Updated answer")
+
+    def test_student_cannot_submit_unenrolled_exam(self):
+        self.assertTrue(self.client.login(username="student", password="sightline"))
+        exam = ExamSession.objects.get(course__code="CSE-335")
+
+        response = self.client.post(
+            f"/api/v1/exams/{exam.id}/attempt",
+            data={"answers": {"q1": "Tab Visibility API"}},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)

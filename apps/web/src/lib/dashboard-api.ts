@@ -19,8 +19,12 @@ import type {
   ContentPost,
   ContentPostListResponse,
   ContentPostPayload,
+  CourseEnrollment,
+  CourseSummary,
   CreditLedgerEntry,
   CurrentUser,
+  ExamAttemptSummary,
+  ExamSessionSummary,
   FeatureFlag,
   JsonValue,
   McpConfig,
@@ -562,4 +566,43 @@ export async function upsertFeatureFlag(
 export async function getAdminAnalytics(): Promise<AdminAnalytics> {
   const response = await apiFetchClient("/api/v1/admin/analytics");
   return parseResponse<AdminAnalytics>(response);
+}
+
+export async function listCourses(): Promise<CourseSummary[]> {
+  const response = await apiFetchClient("/api/v1/courses");
+  return parseResponse<CourseSummary[]>(response);
+}
+
+export async function listEnrollments(): Promise<CourseEnrollment[]> {
+  const response = await apiFetchClient("/api/v1/enrollments");
+  return parseResponse<CourseEnrollment[]>(response);
+}
+
+export async function enrollCourse(courseId: number): Promise<CourseEnrollment> {
+  const response = await apiFetchClient(`/api/v1/courses/${courseId}/enroll`, {
+    method: "POST",
+  });
+  return parseResponse<CourseEnrollment>(response);
+}
+
+export async function listExams(): Promise<ExamSessionSummary[]> {
+  const response = await apiFetchClient("/api/v1/exams");
+  return parseResponse<ExamSessionSummary[]>(response);
+}
+
+export async function listExamAttempts(): Promise<ExamAttemptSummary[]> {
+  const response = await apiFetchClient("/api/v1/exam-attempts");
+  return parseResponse<ExamAttemptSummary[]>(response);
+}
+
+export async function submitExamAttempt(
+  examId: number,
+  answers: Record<string, JsonValue>
+): Promise<ExamAttemptSummary> {
+  const response = await apiFetchClient(`/api/v1/exams/${examId}/attempt`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answers }),
+  });
+  return parseResponse<ExamAttemptSummary>(response);
 }

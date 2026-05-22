@@ -166,6 +166,9 @@ class ExamSession(TimestampedModel):
     starts_at = models.DateTimeField()
     ends_at = models.DateTimeField()
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_SCHEDULED)
+    quiz_title = models.CharField(max_length=180, blank=True)
+    quiz_instructions = models.TextField(blank=True)
+    quiz_questions = models.JSONField(default=list, blank=True)
 
     def __str__(self):
         return f"{self.course.code} in {self.hall.name}"

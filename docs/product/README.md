@@ -9,14 +9,42 @@ Read in order:
 3. [System architecture](./03-system-architecture.md)
 4. [Delivery, validation, and roadmap](./04-delivery-validation-and-roadmap.md)
 
+## MVP Summary
+
 The MVP is deliberately narrow:
 
-- teacher uploads an exam video
-- backend queues analysis
-- worker produces suspicious-event alerts with evidence
-- invigilator reviews the alerts
-- admin manages the simple setup
+- Admin manages everything through Django admin and admin APIs.
+- Teacher creates courses, creates exams, uploads course material if needed, and identifies academically at-risk students before the semester ends.
+- Invigilator uploads exam videos and monitors/reviews and alerts exam evidence.
+- Student enrolls in courses and gives/submits exams.
 
 The only product roles for MVP are `admin`, `teacher`, `student`, and `invigilator`.
 
-No CCTV, RTSP camera, academic-risk analytics, or schedule-reminder module is required for MVP. ProcBot browser monitoring is documented as a later feature, not as the first build target.
+Uploaded exam videos are the first exam-integrity input. Live CCTV/RTSP camera monitoring is not required for the first build.
+
+## Additional Requirement: ProcBot
+
+ProcBot is the browser-monitoring pipeline for BLC quizzes:
+
+```mermaid
+flowchart TD
+  A[Student Opens BLC Quiz] --> B[ProcBot Extension Activates]
+  B --> C[Tab Visibility API]
+  B --> D[Webcam MediaPipe @ 1fps]
+  B --> E[Event Logger]
+  C --> F[Anomaly Classified: TabSwitch / FaceGone / MultiPerson / Phone]
+  D --> F
+  E --> F
+  F --> G[WebSocket Event -> FastAPI]
+  G --> H[Dashboard Alert with Evidence Screenshot]
+```
+
+| Detection | Method | Cost | Cadence |
+| --- | --- | --- | --- |
+| TabSwitch | Browser API | Extremely low | Realtime |
+| FaceGone | MediaPipe Face Detector | Low | Every 5 sec |
+| MultiPerson | MediaPipe Face Detector | Low | Every 5 sec |
+| Phone | ONNX/WebGPU tiny model | Medium | Every 15-20 sec |
+
+Build order should still favor the smallest shippable MVP first, then ProcBot.
+
