@@ -1,0 +1,30 @@
+{
+  "name": "sightline",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sightline monorepo for the Django API, Next.js web app, inference worker, docs, and infrastructure.",
+  "workspaces": [
+    "apps/web",
+    "packages/*"
+  ],
+  "scripts": {
+    "api:install": "python -m pip install -r apps/api-django/requirements.txt",
+    "api:makemigrations": "python apps/api-django/manage.py makemigrations sightline",
+    "api:migrate": "python apps/api-django/manage.py migrate",
+    "api:seed": "python apps/api-django/manage.py seed_sightline",
+    "api:dev": "python apps/api-django/manage.py runserver 127.0.0.1:8000",
+    "backend:install": "npm run api:install",
+    "web:install": "npm install --workspace sightline-web",
+    "web:dev": "npm run dev --workspace sightline-web",
+    "web:build": "npm run build --workspace sightline-web",
+    "web:lint": "npm run lint --workspace sightline-web",
+    "web:preview": "npm run preview --workspace sightline-web",
+    "dev": "concurrently \"npm run web:dev\" \"npm run api:dev\" --names web,api -c blue,green",
+    "install:all": "npm install && npm run api:install",
+    "cleanup:web": "node ./scripts/remove-web.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.0.0",
+    "cross-env": "^10.1.0"
+  }
+}

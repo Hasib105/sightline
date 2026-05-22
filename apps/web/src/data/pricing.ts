@@ -1,0 +1,58 @@
+export const pricingTiers = [
+  {
+    name: "Free",
+    price: "$0",
+    cadence: "forever",
+    description: "3,000 launch credits for first-time signup.",
+    features: [
+      "2,500 one-time bonus credits",
+      "500 monthly credits",
+      "Sail Engine only",
+      "Community support",
+    ],
+    cta: "Get started",
+    highlighted: false,
+  },
+  {
+    name: "Starter",
+    price: "$29",
+    cadence: "/ month",
+    description: "For first production agents and steady prototypes.",
+    features: [
+      "7,000 monthly credits",
+      "$4.14 per 1k basic searches",
+      "Paid advanced routing controls",
+      "Markdown and compression operations",
+    ],
+    cta: "Get started with Starter",
+    highlighted: false,
+  },
+  {
+    name: "Pro",
+    price: "$79",
+    cadence: "/ month",
+    description: "For teams shipping real AI products.",
+    features: [
+      "22,000 monthly credits",
+      "$3.59 per 1k basic searches",
+      "Advanced routing and deep search",
+      "Priority support",
+    ],
+    cta: "Get started with Pro",
+    highlighted: true,
+  },
+  {
+    name: "Scale",
+    price: "$249",
+    cadence: "/ month",
+    description: "Higher-volume AI search with room for bursts.",
+    features: [
+      "85,000 monthly credits",
+      "$2.93 per 1k basic searches",
+      "Higher QPS and priority routing",
+      "Volume top-ups available",
+    ],
+    cta: "Get started with Scale",
+    highlighted: false,
+  },
+] as const;
