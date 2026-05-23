@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ShieldCheck, UsersRound, Video } from "lucide-react";
+import { BookOpenCheck, ClipboardList, ShieldCheck, UsersRound, Video } from "lucide-react";
 
 import { ConsolePage, ConsolePanel, ConsoleStat } from "@/components/dashboard/console";
 import { StudentDashboard } from "@/app/dashboard/student-dashboard";
@@ -25,7 +26,7 @@ export default async function DashboardPage() {
     <ConsolePage
       eyebrow="MVP"
       title="Sightline dashboard"
-      description="The working surface is intentionally small for now: upload videos, review alerts, and manage users through Django admin."
+      description="The working surface is intentionally small for now: upload course materials, review alerts, and manage users through Django admin."
       meta={
         <>
           <span>
@@ -42,9 +43,26 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid gap-3 lg:grid-cols-3">
-        <ConsolePanel title="Teacher" description="Uploads exam videos for analysis.">
+        <ConsolePanel
+          title="Teacher"
+          description="Create courses, prepare exams, upload materials, and review student risk."
+          actions={
+            user.role === "teacher" || user.role === "admin" || user.is_superuser ? (
+              <>
+                <Link href="/dashboard/teacher/courses" className="dashboard-link-button">
+                  <BookOpenCheck className="size-3.5" />
+                  Courses
+                </Link>
+                <Link href="/dashboard/teacher/exams" className="dashboard-link-button">
+                  <ClipboardList className="size-3.5" />
+                  Exams
+                </Link>
+              </>
+            ) : null
+          }
+        >
           <Video className="mb-3 size-5 text-slate-500" />
-          <p className="text-sm text-slate-600">Video upload UI is the next frontend slice.</p>
+          <p className="text-sm text-slate-600">The teacher workspace now covers the core course, exam, material, and risk workflows.</p>
         </ConsolePanel>
         <ConsolePanel title="Invigilator" description="Reviews suspicious moments with evidence.">
           <ShieldCheck className="mb-3 size-5 text-slate-500" />

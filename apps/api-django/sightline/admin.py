@@ -7,6 +7,7 @@ for model in [
     models.Department,
     models.Semester,
     models.Course,
+    models.CourseMaterial,
     models.CourseEnrollment,
     models.UserProfile,
     models.StudentProfile,

@@ -22,7 +22,7 @@ services:
 
   api:
     build:
-      context: ..
+      context: .
       dockerfile: apps/api-django/Dockerfile
     environment:
       DATABASE_URL: postgres://sightline:sightline@db:5432/sightline
@@ -49,7 +49,7 @@ services:
 
   web:
     build:
-      context: ..
+      context: .
       dockerfile: apps/web/Dockerfile
     environment:
       API_INTERNAL_BASE_URL: http://api:8000

@@ -22,6 +22,7 @@ from .models import (
     Camera,
     Course,
     CourseEnrollment,
+    CourseMaterial,
     Department,
     EvidenceAsset,
     ExamAttempt,
@@ -225,6 +226,50 @@ class ApiV1DispatchView(SessionlessAPIView):
                 serializer.is_valid(raise_exception=True)
                 course = serializer.save()
                 return Response(serializers.CourseSerializer(course).data, status=status.HTTP_201_CREATED)
+
+        if clean_path.startswith("courses/") and clean_path.endswith("/materials"):
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            course_id = clean_path.split("/")[1]
+            course = Course.objects.filter(id=course_id).first()
+            if not course:
+                return Response({"detail": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            def can_view_materials():
+                if is_admin_request(request):
+                    return True
+                role = user_role(request)
+                if role == UserProfile.ROLE_TEACHER:
+                    return course.teacher_id == django_user(request).id
+                if role == UserProfile.ROLE_STUDENT:
+                    student = serializers.student_for_user(django_user(request))
+                    if not student:
+                        return False
+                    return CourseEnrollment.objects.filter(
+                        course=course,
+                        student=student,
+                        status=CourseEnrollment.STATUS_ACTIVE,
+                    ).exists()
+                return False
+
+            if request.method == "GET":
+                if not can_view_materials():
+                    return Response({"detail": "Not authorized to view course materials."}, status=status.HTTP_403_FORBIDDEN)
+                queryset = CourseMaterial.objects.filter(course=course).select_related("uploaded_by", "course")
+                return Response(serializers.CourseMaterialSerializer(queryset, many=True).data)
+            if request.method == "POST":
+                if not has_role(request, UserProfile.ROLE_TEACHER):
+                    return Response({"detail": "Only teachers or admins can upload course materials."}, status=status.HTTP_403_FORBIDDEN)
+                if not is_admin_request(request) and course.teacher_id != django_user(request).id:
+                    return Response({"detail": "Teachers can upload materials only for their own courses."}, status=status.HTTP_403_FORBIDDEN)
+                serializer = serializers.CourseMaterialSerializer(
+                    data=request.data,
+                    context={"request": request, "course": course},
+                )
+                serializer.is_valid(raise_exception=True)
+                material = serializer.save()
+                return Response(serializers.CourseMaterialSerializer(material).data, status=status.HTTP_201_CREATED)
 
         if clean_path == "enrollments" and request.method == "GET":
             auth_error = self.auth_required(request)

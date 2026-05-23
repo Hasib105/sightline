@@ -108,24 +108,50 @@ Prerequisites:
 Install dependencies:
 
 ```bash
-npm install
-npm run api:install
+pnpm install
+pnpm run api:install
 ```
 
 Create the local database and seed demo data:
 
 ```bash
-npm run api:migrate
-npm run api:seed
+pnpm run api:migrate
+pnpm run api:seed
 ```
 
 Start the API and web app:
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 Open `http://localhost:3000`.
+
+## Running With Docker
+
+Build and start the web app, Django API, PostgreSQL, and Redis:
+
+```bash
+pnpm run docker:up
+```
+
+Then open:
+
+- Web: `http://localhost:3000`
+- API: `http://localhost:8000`
+- Django admin: `http://localhost:8000/admin/`
+
+Seed demo users after the API container is running:
+
+```bash
+pnpm run docker:seed
+```
+
+Stop the stack:
+
+```bash
+pnpm run docker:down
+```
 
 Demo users all use password `sightline`:
 
@@ -137,4 +163,3 @@ Demo users all use password `sightline`:
 ## Current Implementation Notes
 
 The codebase still contains some prototype tables and endpoints from an earlier larger platform. Treat the docs in `docs/product` as the source of truth for the current MVP.
-

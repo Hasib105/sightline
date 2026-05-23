@@ -16,7 +16,7 @@ This is the Next.js web app for Sightline, kept in the monorepo at `apps/web` so
 3. Start the web app:
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 The app runs on `http://localhost:3000` by default.

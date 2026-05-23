@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, BookOpenCheck, ClipboardList, Loader2 } from "lucide-react";
+import { ArrowLeft, BookOpenCheck, ClipboardList, FileText, Loader2 } from "lucide-react";
 
 import {
   ConsoleEmptyState,
@@ -16,11 +16,13 @@ import {
 } from "@/components/dashboard/console";
 import {
   ApiError,
+  getCurrentUserClient,
+  listCourseMaterials,
   listCourses,
   listEnrollments,
   listExams,
 } from "@/lib/dashboard-api";
-import type { CourseEnrollment, ExamSessionSummary } from "@/lib/types";
+import type { CourseEnrollment, CourseMaterial, ExamSessionSummary } from "@/lib/types";
 
 function examStatusTone(status: ExamSessionSummary["status"]) {
   if (status === "live" || status === "prepared") {
@@ -66,6 +68,16 @@ export default function CourseDetailsPage() {
     queryFn: listExams,
     enabled: isCourseIdValid,
   });
+  const userQuery = useQuery({
+    queryKey: ["me"],
+    queryFn: getCurrentUserClient,
+    enabled: isCourseIdValid,
+  });
+  const materialsQuery = useQuery({
+    queryKey: ["course-materials", courseId],
+    queryFn: () => listCourseMaterials(courseId),
+    enabled: isCourseIdValid,
+  });
 
   const loading = coursesQuery.isLoading || enrollmentsQuery.isLoading || examsQuery.isLoading;
   const error = coursesQuery.error ?? enrollmentsQuery.error ?? examsQuery.error;
@@ -83,6 +95,10 @@ export default function CourseDetailsPage() {
     () => (examsQuery.data ?? []).filter((item) => item.course === courseId),
     [examsQuery.data, courseId]
   );
+  const materials: CourseMaterial[] = useMemo(
+    () => materialsQuery.data ?? [],
+    [materialsQuery.data]
+  );
 
   const enrollmentStatValue = enrollment
     ? enrollment.status
@@ -94,6 +110,10 @@ export default function CourseDetailsPage() {
     : courseEnrollments.length > 0
       ? "Students enrolled in this course"
       : "No active enrollments";
+  const materialsLoading = materialsQuery.isLoading;
+  const materialsError = materialsQuery.error as ApiError | null;
+  const canManageMaterials =
+    userQuery.data?.role === "teacher" || userQuery.data?.role === "admin" || userQuery.data?.is_superuser;
 
   return (
     <ConsolePage
@@ -238,7 +258,7 @@ export default function CourseDetailsPage() {
               exams.map((exam) => (
                 <div
                   key={exam.id}
-                  className="rounded-md border border-[var(--dashboard-border)] bg-[var(--dashboard-panel-muted)] p-3"
+                  className="rounded-md border border-(--dashboard-border) bg-(--dashboard-panel-muted) p-3"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -251,6 +271,60 @@ export default function CourseDetailsPage() {
                       </p>
                     </div>
                     <StatusBadge label={exam.status} tone={examStatusTone(exam.status)} />
+                  </div>
+                </div>
+              ))
+            )}
+          </ConsolePanel>
+
+          <ConsolePanel
+            title="Course materials"
+            description="Slides, videos, and links shared for this course."
+            actions={
+              canManageMaterials ? (
+                <Link href="/dashboard/teacher/materials" className="dashboard-link-button">
+                  Manage materials
+                </Link>
+              ) : null
+            }
+            contentClassName="space-y-2"
+          >
+            {materialsLoading ? (
+              <div className="flex items-center justify-center p-6">
+                <Loader2 className="size-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : materialsError ? (
+              <p className="text-sm text-red-600">{materialsError.message}</p>
+            ) : materials.length === 0 ? (
+              <ConsoleEmptyState
+                title="No materials yet"
+                description="Teachers can upload slides, videos, or URLs for this course."
+                icon={FileText}
+              />
+            ) : (
+              materials.map((material) => (
+                <div
+                  key={material.id}
+                  className="rounded-md border border-(--dashboard-border) bg-(--dashboard-panel-muted) p-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="truncate text-sm font-semibold text-foreground">
+                        {material.title}
+                      </h2>
+                      {material.description ? (
+                        <p className="mt-1 text-sm text-muted-foreground">{material.description}</p>
+                      ) : null}
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Added by {material.uploaded_by_username ?? "Teacher"}
+                      </p>
+                    </div>
+                    <StatusBadge label={material.kind} tone="muted" />
+                  </div>
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    <a href={material.uri} target="_blank" rel="noreferrer" className="underline">
+                      {material.original_filename || material.uri}
+                    </a>
                   </div>
                 </div>
               ))

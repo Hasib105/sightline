@@ -516,6 +516,27 @@ export interface CourseSummary {
   updated_at: string;
 }
 
+export interface CourseCreatePayload {
+  code: string;
+  title: string;
+}
+
+export interface CourseMaterial {
+  id: number;
+  course: number;
+  course_code: string;
+  course_title: string;
+  uploaded_by: number | null;
+  uploaded_by_username: string | null;
+  kind: "video" | "slide" | "url";
+  title: string;
+  description: string;
+  uri: string;
+  original_filename: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CourseEnrollment {
   id: number;
   course: number;
@@ -546,6 +567,16 @@ export interface ExamSessionSummary {
   updated_at: string;
 }
 
+export interface ExamCreatePayload {
+  course: number;
+  starts_at: string;
+  ends_at: string;
+  status?: ExamSessionSummary["status"];
+  quiz_title?: string;
+  quiz_instructions?: string;
+  quiz_questions?: JsonValue[];
+}
+
 export interface ExamAttemptSummary {
   id: number;
   exam_session: number;
@@ -557,6 +588,40 @@ export interface ExamAttemptSummary {
   submitted_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface StudentRiskScore {
+  id: number;
+  student: number;
+  student_number: string;
+  student_name: string;
+  course: number;
+  course_code: string;
+  risk_level: "low" | "medium" | "high";
+  risk_score: number;
+  contributing_factors: JsonValue[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AtRiskInputRow {
+  student_number: string;
+  attended: number;
+  total: number;
+  score: number;
+  max_score: number;
+  label?: string;
+}
+
+export interface AtRiskRunPayload {
+  course: number;
+  source_name?: string;
+  rows: AtRiskInputRow[];
+}
+
+export interface AtRiskRunResponse {
+  run_id: number;
+  scores: StudentRiskScore[];
 }
 
 export interface AdminAnalyticsCard {

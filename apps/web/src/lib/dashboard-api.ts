@@ -19,10 +19,15 @@ import type {
   ContentPost,
   ContentPostListResponse,
   ContentPostPayload,
+  AtRiskRunPayload,
+  AtRiskRunResponse,
+  CourseCreatePayload,
   CourseEnrollment,
+  CourseMaterial,
   CourseSummary,
   CreditLedgerEntry,
   CurrentUser,
+  ExamCreatePayload,
   ExamAttemptSummary,
   ExamSessionSummary,
   FeatureFlag,
@@ -39,6 +44,7 @@ import type {
   SearchJobAccepted,
   SearchIntelligenceResponse,
   SearchResponse,
+  StudentRiskScore,
   SystemSetting,
   UserSetting,
 } from "@/lib/types";
@@ -573,6 +579,40 @@ export async function listCourses(): Promise<CourseSummary[]> {
   return parseResponse<CourseSummary[]>(response);
 }
 
+export async function createCourse(payload: CourseCreatePayload): Promise<CourseSummary> {
+  const response = await apiFetchClient("/api/v1/courses", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<CourseSummary>(response);
+}
+
+export type CourseMaterialPayload = {
+  kind: CourseMaterial["kind"];
+  title: string;
+  description?: string;
+  uri: string;
+  original_filename?: string;
+};
+
+export async function listCourseMaterials(courseId: number): Promise<CourseMaterial[]> {
+  const response = await apiFetchClient(`/api/v1/courses/${courseId}/materials`);
+  return parseResponse<CourseMaterial[]>(response);
+}
+
+export async function createCourseMaterial(
+  courseId: number,
+  payload: CourseMaterialPayload
+): Promise<CourseMaterial> {
+  const response = await apiFetchClient(`/api/v1/courses/${courseId}/materials`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<CourseMaterial>(response);
+}
+
 export async function listEnrollments(): Promise<CourseEnrollment[]> {
   const response = await apiFetchClient("/api/v1/enrollments");
   return parseResponse<CourseEnrollment[]>(response);
@@ -590,6 +630,15 @@ export async function listExams(): Promise<ExamSessionSummary[]> {
   return parseResponse<ExamSessionSummary[]>(response);
 }
 
+export async function createExam(payload: ExamCreatePayload): Promise<ExamSessionSummary> {
+  const response = await apiFetchClient("/api/v1/exams", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<ExamSessionSummary>(response);
+}
+
 export async function listExamAttempts(): Promise<ExamAttemptSummary[]> {
   const response = await apiFetchClient("/api/v1/exam-attempts");
   return parseResponse<ExamAttemptSummary[]>(response);
@@ -605,4 +654,20 @@ export async function submitExamAttempt(
     body: JSON.stringify({ answers }),
   });
   return parseResponse<ExamAttemptSummary>(response);
+}
+
+export async function listAtRiskScores(): Promise<StudentRiskScore[]> {
+  const response = await apiFetchClient("/api/v1/at-risk");
+  return parseResponse<StudentRiskScore[]>(response);
+}
+
+export async function runAtRiskAnalysis(
+  payload: AtRiskRunPayload
+): Promise<AtRiskRunResponse> {
+  const response = await apiFetchClient("/api/v1/at-risk", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<AtRiskRunResponse>(response);
 }

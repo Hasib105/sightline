@@ -130,7 +130,7 @@ export default function AdminUsersPage() {
           ) : usersQuery.error ? (
             <p className="text-sm text-red-600">{(usersQuery.error as ApiError).message}</p>
           ) : users.length === 0 ? (
-            <ConsoleEmptyState title="No users found" description="Run npm run api:seed to create demo users." />
+            <ConsoleEmptyState title="No users found" description="Run pnpm run api:seed to create demo users." />
           ) : (
             <DataTable containerClassName="max-h-[620px]">
               <thead>

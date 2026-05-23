@@ -9,6 +9,7 @@ from .models import (
     AttendanceRecord,
     Course,
     CourseEnrollment,
+    CourseMaterial,
     Department,
     ExamAttempt,
     ExamSession,
@@ -28,7 +29,7 @@ def role_permissions(role):
     if role == UserProfile.ROLE_INVIGILATOR:
         return ["exam_videos.upload", "exam_videos.monitor", "alerts.review"]
     if role == UserProfile.ROLE_TEACHER:
-        return ["courses.manage", "exams.manage", "risk.identify"]
+        return ["courses.manage", "exams.manage", "risk.identify", "course_materials.manage"]
     return ["courses.enroll", "exams.take"]
 
 
@@ -273,6 +274,39 @@ class CourseSerializer(serializers.ModelSerializer):
         validated_data.setdefault("teacher", request_user(request))
         validated_data.setdefault("department", default_department())
         validated_data.setdefault("semester", default_semester())
+        return super().create(validated_data)
+
+
+class CourseMaterialSerializer(serializers.ModelSerializer):
+    course_code = serializers.CharField(source="course.code", read_only=True)
+    course_title = serializers.CharField(source="course.title", read_only=True)
+    uploaded_by_username = serializers.CharField(source="uploaded_by.username", read_only=True)
+
+    class Meta:
+        model = CourseMaterial
+        fields = [
+            "id",
+            "course",
+            "course_code",
+            "course_title",
+            "uploaded_by",
+            "uploaded_by_username",
+            "kind",
+            "title",
+            "description",
+            "uri",
+            "original_filename",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["course", "uploaded_by", "created_at", "updated_at"]
+
+    def create(self, validated_data):
+        request = self.context["request"]
+        course = self.context.get("course")
+        if course:
+            validated_data["course"] = course
+        validated_data["uploaded_by"] = request_user(request)
         return super().create(validated_data)
 
 

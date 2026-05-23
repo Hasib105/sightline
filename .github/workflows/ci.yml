@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  api:
+    name: Django API
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: sightline
+          POSTGRES_USER: sightline
+          POSTGRES_PASSWORD: sightline
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sightline -d sightline"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    env:
+      DATABASE_URL: postgres://sightline:sightline@localhost:5432/sightline
+      CELERY_BROKER_URL: redis://localhost:6379/0
+      SIGHTLINE_SECRET_KEY: ci-secret
+      SIGHTLINE_DEBUG: "0"
+      SIGHTLINE_ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/api-django/requirements.txt
+      - name: Install API dependencies
+        run: python -m pip install -r apps/api-django/requirements.txt
+      - name: Check Django project
+        run: python apps/api-django/manage.py check
+      - name: Run API tests
+        run: python apps/api-django/manage.py test sightline
+
+  web:
+    name: Next.js Web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install web dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint web
+        run: pnpm run web:lint
+      - name: Build web
+        run: pnpm run web:build
+
+  docker:
+    name: Docker Images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker images
+        run: docker compose build

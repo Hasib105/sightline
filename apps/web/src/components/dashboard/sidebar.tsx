@@ -12,6 +12,7 @@ import {
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   ArrowUpRight,
   Bell,
   BookOpenCheck,
@@ -30,6 +31,7 @@ import {
   Search,
   ShieldCheck,
   Sun,
+  Upload,
   UserRoundCog,
   Users,
   Wallet,
@@ -84,6 +86,10 @@ const routeLabels: Record<string, string> = {
   "/dashboard": "Overview",
   "/dashboard/courses": "Courses",
   "/dashboard/exams": "Exams",
+  "/dashboard/teacher/courses": "Teacher Courses",
+  "/dashboard/teacher/exams": "Teacher Exams",
+  "/dashboard/teacher/materials": "Course materials",
+  "/dashboard/teacher/risk": "At-risk Students",
   "/dashboard/playground": "Playground",
   "/dashboard/api-keys": "API Keys",
   "/dashboard/docs": "Docs",
@@ -178,6 +184,18 @@ function navigationFor(kind: ShellKind, user: CurrentUser): ShellSection[] {
       items: [
         { href: "/dashboard/courses", icon: BookOpenCheck, label: "Enroll Courses" },
         { href: "/dashboard/exams", icon: ClipboardList, label: "Give Exams" },
+      ],
+    });
+  }
+
+  if (user.role === "teacher" || user.role === "admin" || user.is_superuser) {
+    sections.push({
+      label: "Teacher",
+      items: [
+        { href: "/dashboard/teacher/courses", icon: BookOpenCheck, label: "Courses" },
+        { href: "/dashboard/teacher/exams", icon: ClipboardList, label: "Exams" },
+        { href: "/dashboard/teacher/materials", icon: Upload, label: "Course Materials" },
+        { href: "/dashboard/teacher/risk", icon: AlertTriangle, label: "At-risk Students" },
       ],
     });
   }

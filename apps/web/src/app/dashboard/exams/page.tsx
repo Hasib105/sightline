@@ -599,6 +599,7 @@ export default function StudentExamsPage() {
     }
     const match = exams.find((exam) => exam.id === examIdFromQuery);
     if (match) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Synchronizes a route query param after exams load.
       setSelectedExamId(match.id);
       syncedExamParamRef.current = true;
     }

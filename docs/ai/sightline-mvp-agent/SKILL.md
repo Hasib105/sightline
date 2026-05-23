@@ -102,7 +102,7 @@ Default demo password: `sightline`.
 Run seed with:
 
 ```bash
-npm run api:seed
+pnpm run api:seed
 ```
 
 or:
@@ -117,8 +117,7 @@ Before handing work back, run the smallest useful checks:
 
 - `python apps/api-django/manage.py check`
 - `python apps/api-django/manage.py test sightline`
-- `npm run web:lint`
-- `npm run web:build`
+- `pnpm run web:lint`
+- `pnpm run web:build`
 
 If a command cannot run, report the exact reason and what remains unverified.
-

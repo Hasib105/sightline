@@ -42,6 +42,31 @@ class Course(TimestampedModel):
         return f"{self.code} - {self.title}"
 
 
+class CourseMaterial(TimestampedModel):
+    KIND_VIDEO = "video"
+    KIND_SLIDE = "slide"
+    KIND_URL = "url"
+    KIND_CHOICES = [
+        (KIND_VIDEO, "Video"),
+        (KIND_SLIDE, "Slide"),
+        (KIND_URL, "URL"),
+    ]
+
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="materials")
+    uploaded_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+    kind = models.CharField(max_length=24, choices=KIND_CHOICES)
+    title = models.CharField(max_length=180)
+    description = models.TextField(blank=True)
+    uri = models.CharField(max_length=300)
+    original_filename = models.CharField(max_length=180, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.course.code} - {self.title}"
+
+
 class UserProfile(TimestampedModel):
     ROLE_ADMIN = "admin"
     ROLE_TEACHER = "teacher"
