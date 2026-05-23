@@ -65,6 +65,23 @@ export default function AdminOverviewPage() {
               </div>
             </ConsolePanel>
           </div>
+
+          <ConsolePanel title="Manage accounts" description="Open a focused page for each role group.">
+            <div className="grid gap-3 md:grid-cols-3">
+              <Link href="/admin/users" className={cn(buttonVariants({ variant: "outline" }), "justify-start gap-2")}>
+                <UsersRound className="size-4" />
+                All users
+              </Link>
+              <Link href="/admin/teachers" className={cn(buttonVariants({ variant: "outline" }), "justify-start gap-2")}>
+                <ShieldCheck className="size-4" />
+                Teachers
+              </Link>
+              <Link href="/admin/invigilators" className={cn(buttonVariants({ variant: "outline" }), "justify-start gap-2")}>
+                <ArrowRight className="size-4" />
+                Invigilators
+              </Link>
+            </div>
+          </ConsolePanel>
         </>
       )}
     </ConsolePage>
