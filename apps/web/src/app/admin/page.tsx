@@ -2,12 +2,102 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Loader2, ShieldCheck, UsersRound } from "lucide-react";
+import {
+  ArrowRight,
+  Bell,
+  BookOpenCheck,
+  Command,
+  CreditCard,
+  Database,
+  Fingerprint,
+  LayoutDashboard,
+  Loader2,
+  Settings2,
+  ShieldCheck,
+  SlidersHorizontal,
+  UsersRound,
+  Wallet,
+} from "lucide-react";
 
 import { ConsolePage, ConsolePanel, ConsoleStat } from "@/components/dashboard/console";
 import { buttonVariants } from "@/components/ui/button";
 import { getAdminOverview, listAdminUsers } from "@/lib/dashboard-api";
 import { cn } from "@/lib/utils";
+
+const adminModules = [
+  {
+    href: "/admin",
+    label: "Overview",
+    description: "Admin landing page and summary metrics.",
+    icon: LayoutDashboard,
+  },
+  {
+    href: "/admin/users",
+    label: "All users",
+    description: "Create and manage every account.",
+    icon: UsersRound,
+  },
+  {
+    href: "/admin/teachers",
+    label: "Teachers",
+    description: "Teacher-specific account management.",
+    icon: BookOpenCheck,
+  },
+  {
+    href: "/admin/invigilators",
+    label: "Invigilators",
+    description: "Invigilator-specific account management.",
+    icon: ShieldCheck,
+  },
+  {
+    href: "/admin/analytics",
+    label: "Analytics",
+    description: "Usage, health, and business signals.",
+    icon: Bell,
+  },
+  {
+    href: "/admin/plans",
+    label: "Plans & Credits",
+    description: "Pricing, credits, and billing setup.",
+    icon: Wallet,
+  },
+  {
+    href: "/admin/provider-routing",
+    label: "Provider Routing",
+    description: "How model traffic is routed.",
+    icon: Command,
+  },
+  {
+    href: "/admin/provider-credentials",
+    label: "Provider Credentials",
+    description: "Manage credentials and access.",
+    icon: Fingerprint,
+  },
+  {
+    href: "/admin/proxies",
+    label: "Proxies",
+    description: "Proxy inventory and health.",
+    icon: Database,
+  },
+  {
+    href: "/admin/sessions",
+    label: "Sessions",
+    description: "Runtime sessions and state.",
+    icon: SlidersHorizontal,
+  },
+  {
+    href: "/admin/feature-flags",
+    label: "Feature Flags",
+    description: "Toggle features for the platform.",
+    icon: CreditCard,
+  },
+  {
+    href: "/admin/system-settings",
+    label: "System Settings",
+    description: "Global platform configuration.",
+    icon: Settings2,
+  },
+] as const;
 
 export default function AdminOverviewPage() {
   const overviewQuery = useQuery({
@@ -26,8 +116,8 @@ export default function AdminOverviewPage() {
     <ConsolePage
       eyebrow="Admin"
       title="MVP admin"
-      description="Keep setup small for now. Manage users here; video upload and alert review are the next dashboard slices."
-      meta={<span>{overviewQuery.data?.total_users ?? users.length} users in local database</span>}
+      description="Open any admin model from one place. The list is data-driven, so you can add more models later without redesigning the page."
+      meta={<span>{adminModules.length} admin modules · {overviewQuery.data?.total_users ?? users.length} users in local database</span>}
       actions={
         <Link href="/admin/users" className={cn(buttonVariants({ size: "sm" }), "gap-2")}>
           Manage users
@@ -66,20 +156,27 @@ export default function AdminOverviewPage() {
             </ConsolePanel>
           </div>
 
-          <ConsolePanel title="Manage accounts" description="Open a focused page for each role group.">
-            <div className="grid gap-3 md:grid-cols-3">
-              <Link href="/admin/users" className={cn(buttonVariants({ variant: "outline" }), "justify-start gap-2")}>
-                <UsersRound className="size-4" />
-                All users
-              </Link>
-              <Link href="/admin/teachers" className={cn(buttonVariants({ variant: "outline" }), "justify-start gap-2")}>
-                <ShieldCheck className="size-4" />
-                Teachers
-              </Link>
-              <Link href="/admin/invigilators" className={cn(buttonVariants({ variant: "outline" }), "justify-start gap-2")}>
-                <ArrowRight className="size-4" />
-                Invigilators
-              </Link>
+          <ConsolePanel title="Admin modules" description="Everything available in the admin console now, with room to add more later.">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {adminModules.map((module) => {
+                const Icon = module.icon;
+                return (
+                  <Link
+                    key={module.href}
+                    href={module.href}
+                    className={cn(
+                      buttonVariants({ variant: "outline" }),
+                      "h-auto items-start justify-start gap-3 rounded-xl p-4 text-left"
+                    )}
+                  >
+                    <Icon className="mt-0.5 size-4 shrink-0" />
+                    <span className="min-w-0">
+                      <span className="block font-medium">{module.label}</span>
+                      <span className="mt-1 block text-xs text-muted-foreground">{module.description}</span>
+                    </span>
+                  </Link>
+                );
+              })}
             </div>
           </ConsolePanel>
         </>
