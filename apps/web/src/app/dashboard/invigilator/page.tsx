@@ -15,7 +15,7 @@ import {
   consoleTableHeaderCellClass,
 } from "@/components/dashboard/console";
 import { Button } from "@/components/ui/button";
-import { ApiError, listIntegrityAlerts, reviewIntegrityAlert } from "@/lib/dashboard-api";
+import { ApiError, getIntegrityAlert, listIntegrityAlerts, reviewIntegrityAlert } from "@/lib/dashboard-api";
 import type { IntegrityAlertDetail, IntegrityAlertSummary } from "@/lib/types";
 
 const reviewTone: Record<string, "success" | "warning" | "muted"> = {
@@ -56,10 +56,13 @@ export default function InvigilatorDashboardPage() {
   const [reviewerUsername, setReviewerUsername] = useState("invigilator");
   const [note, setNote] = useState("Reviewed in invigilator console.");
 
-  const selectedAlert = useMemo(
-    () => alerts.find((alert) => alert.id === selectedAlertId) ?? alerts[0] ?? null,
-    [alerts, selectedAlertId]
-  );
+  const activeAlertId = selectedAlertId ?? alerts[0]?.id ?? null;
+  const selectedAlertQuery = useQuery<IntegrityAlertDetail>({
+    queryKey: ["integrity-alert", activeAlertId],
+    queryFn: () => getIntegrityAlert(activeAlertId as number),
+    enabled: activeAlertId !== null,
+  });
+  const selectedAlert = selectedAlertQuery.data ?? null;
 
   const reviewMutation = useMutation({
     mutationFn: ({ alertId, decision }: { alertId: number; decision: "confirmed" | "dismissed" | "follow_up" }) =>
