@@ -31,6 +31,11 @@ import type {
   ExamAttemptSummary,
   ExamSessionSummary,
   FeatureFlag,
+  IntegrityAlertDetail,
+  IntegrityAlertResponse,
+  IntegrityAlertReviewPayload,
+  IntegrityAlertsResponse,
+  IntegrityAlertSummary,
   JsonValue,
   McpConfig,
   NotificationItem,
@@ -100,6 +105,31 @@ export async function markAllNotificationsRead(): Promise<NotificationReadRespon
     method: "POST",
   });
   return parseResponse<NotificationReadResponse>(response);
+}
+
+export async function listIntegrityAlerts(): Promise<IntegrityAlertSummary[]> {
+  const response = await apiFetchClient("/api/integrity/alerts/");
+  const payload = await parseResponse<IntegrityAlertsResponse>(response);
+  return payload.alerts;
+}
+
+export async function getIntegrityAlert(alertId: number): Promise<IntegrityAlertDetail> {
+  const response = await apiFetchClient(`/api/integrity/alerts/${alertId}/`);
+  const payload = await parseResponse<IntegrityAlertResponse>(response);
+  return payload.alert;
+}
+
+export async function reviewIntegrityAlert(
+  alertId: number,
+  payload: IntegrityAlertReviewPayload
+): Promise<IntegrityAlertDetail> {
+  const response = await apiFetchClient(`/api/integrity/alerts/${alertId}/review/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await parseResponse<IntegrityAlertResponse>(response);
+  return data.alert;
 }
 
 export async function createApiKey(name: string): Promise<ApiKeyCreated> {

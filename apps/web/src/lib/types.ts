@@ -37,6 +37,84 @@ export interface NotificationReadResponse {
   unread_count: number;
 }
 
+export type IntegrityAlertType = "look_away" | "neighboring_desk" | "unauthorized_device";
+export type IntegrityAlertStatus = "detected" | "visible" | "confirmed" | "dismissed" | "follow_up" | "closed";
+export type IntegrityAlertDecision = "confirmed" | "dismissed" | "follow_up";
+
+export interface IntegrityAlertEvidenceAsset {
+  id: number;
+  kind: string;
+  uri: string;
+  capturedAt: string;
+  qualityNote: string;
+}
+
+export interface IntegrityAlertReviewAction {
+  id: number;
+  reviewer: string;
+  decision: IntegrityAlertDecision;
+  note: string;
+  createdAt: string;
+}
+
+export interface IntegrityAlertWindow {
+  startedAt: string;
+  endedAt: string;
+}
+
+export interface IntegrityAlertCamera {
+  id: number;
+  name: string;
+  status: string;
+}
+
+export interface IntegrityAlertSeat {
+  id: number;
+  label: string;
+}
+
+export interface IntegrityAlertExamSession {
+  id: number;
+  course: string;
+  courseTitle: string;
+  hall: string;
+  status: string;
+}
+
+export interface IntegrityAlertSummary {
+  id: number;
+  alertType: IntegrityAlertType;
+  alertTypeLabel: string;
+  status: IntegrityAlertStatus;
+  summary: string;
+  occurredAt: string;
+  window: IntegrityAlertWindow;
+  confidenceScore: number;
+  visibilityQuality: string;
+  examSession: IntegrityAlertExamSession;
+  camera: IntegrityAlertCamera;
+  seat: IntegrityAlertSeat | null;
+}
+
+export interface IntegrityAlertDetail extends IntegrityAlertSummary {
+  evidenceAssets: IntegrityAlertEvidenceAsset[];
+  reviewActions: IntegrityAlertReviewAction[];
+}
+
+export interface IntegrityAlertsResponse {
+  alerts: IntegrityAlertSummary[];
+}
+
+export interface IntegrityAlertResponse {
+  alert: IntegrityAlertDetail;
+}
+
+export interface IntegrityAlertReviewPayload {
+  decision: IntegrityAlertDecision;
+  reviewerUsername?: string;
+  note?: string;
+}
+
 export interface ApiKey {
   id: number;
   name: string;
