@@ -4,13 +4,8 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
-  Bell,
   BookOpenCheck,
-  Command,
-  CreditCard,
   Database,
-  Fingerprint,
-  LayoutDashboard,
   Loader2,
   Settings2,
   ShieldCheck,
@@ -24,13 +19,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { getAdminOverview, listAdminUsers } from "@/lib/dashboard-api";
 import { cn } from "@/lib/utils";
 
-const adminModules = [
-  {
-    href: "/admin",
-    label: "Overview",
-    description: "Admin landing page and summary metrics.",
-    icon: LayoutDashboard,
-  },
+const roleModules = [
   {
     href: "/admin/users",
     label: "All users",
@@ -49,52 +38,37 @@ const adminModules = [
     description: "Invigilator-specific account management.",
     icon: ShieldCheck,
   },
+] as const;
+
+const modelModules = [
   {
-    href: "/admin/analytics",
-    label: "Analytics",
-    description: "Usage, health, and business signals.",
-    icon: Bell,
+    href: "/dashboard/admin/content",
+    label: "Content",
+    description: "Blog/news records and publish controls.",
+    icon: BookOpenCheck,
   },
   {
-    href: "/admin/plans",
-    label: "Plans & Credits",
-    description: "Pricing, credits, and billing setup.",
-    icon: Wallet,
-  },
-  {
-    href: "/admin/provider-routing",
-    label: "Provider Routing",
-    description: "How model traffic is routed.",
-    icon: Command,
-  },
-  {
-    href: "/admin/provider-credentials",
-    label: "Provider Credentials",
-    description: "Manage credentials and access.",
-    icon: Fingerprint,
-  },
-  {
-    href: "/admin/proxies",
-    label: "Proxies",
-    description: "Proxy inventory and health.",
+    href: "/dashboard/admin/models",
+    label: "Models",
+    description: "Inspect and edit the available database models.",
     icon: Database,
   },
   {
-    href: "/admin/sessions",
-    label: "Sessions",
-    description: "Runtime sessions and state.",
+    href: "/dashboard/admin/pricing",
+    label: "Pricing",
+    description: "Plans, credits, and billing controls.",
+    icon: Wallet,
+  },
+  {
+    href: "/dashboard/admin/proxy-endpoints",
+    label: "Proxy Endpoints",
+    description: "Runtime proxy inventory and diagnostics.",
     icon: SlidersHorizontal,
   },
   {
-    href: "/admin/feature-flags",
-    label: "Feature Flags",
-    description: "Toggle features for the platform.",
-    icon: CreditCard,
-  },
-  {
-    href: "/admin/system-settings",
+    href: "/dashboard/admin/system-settings",
     label: "System Settings",
-    description: "Global platform configuration.",
+    description: "Global JSON configuration and toggles.",
     icon: Settings2,
   },
 ] as const;
@@ -116,8 +90,8 @@ export default function AdminOverviewPage() {
     <ConsolePage
       eyebrow="Admin"
       title="MVP admin"
-      description="Open any admin model from one place. The list is data-driven, so you can add more models later without redesigning the page."
-      meta={<span>{adminModules.length} admin modules · {overviewQuery.data?.total_users ?? users.length} users in local database</span>}
+      description="Open the actual admin pages that already exist in the repo. Role management stays here; model pages live in the dashboard admin console."
+      meta={<span>{roleModules.length + modelModules.length} visible sections · {overviewQuery.data?.total_users ?? users.length} users in local database</span>}
       actions={
         <Link href="/admin/users" className={cn(buttonVariants({ size: "sm" }), "gap-2")}>
           Manage users
@@ -156,18 +130,36 @@ export default function AdminOverviewPage() {
             </ConsolePanel>
           </div>
 
-          <ConsolePanel title="Admin modules" description="Everything available in the admin console now, with room to add more later.">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {adminModules.map((module) => {
+          <ConsolePanel title="Role pages" description="The pages already available for user management.">
+            <div className="grid gap-3 md:grid-cols-3">
+              {roleModules.map((module) => {
                 const Icon = module.icon;
                 return (
                   <Link
                     key={module.href}
                     href={module.href}
-                    className={cn(
-                      buttonVariants({ variant: "outline" }),
-                      "h-auto items-start justify-start gap-3 rounded-xl p-4 text-left"
-                    )}
+                    className={cn(buttonVariants({ variant: "outline" }), "h-auto items-start justify-start gap-3 rounded-xl p-4 text-left")}
+                  >
+                    <Icon className="mt-0.5 size-4 shrink-0" />
+                    <span className="min-w-0">
+                      <span className="block font-medium">{module.label}</span>
+                      <span className="mt-1 block text-xs text-muted-foreground">{module.description}</span>
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          </ConsolePanel>
+
+          <ConsolePanel title="Model pages" description="These are the actual model/admin pages in the repo right now.">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {modelModules.map((module) => {
+                const Icon = module.icon;
+                return (
+                  <Link
+                    key={module.href}
+                    href={module.href}
+                    className={cn(buttonVariants({ variant: "outline" }), "h-auto items-start justify-start gap-3 rounded-xl p-4 text-left")}
                   >
                     <Icon className="mt-0.5 size-4 shrink-0" />
                     <span className="min-w-0">
