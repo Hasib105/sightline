@@ -1,11 +1,14 @@
 import json
+from pathlib import Path
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from django.conf import settings
 from django.contrib.auth import authenticate, get_user, login as django_login, logout as django_logout
 from django.contrib.auth.models import User
+from django.core.files.storage import default_storage
 from django.db.models import Count
-from django.http import JsonResponse
+from django.http import JsonResponse, StreamingHttpResponse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -28,6 +31,7 @@ from .models import (
     ExamAttempt,
     ExamSession,
     ExamVideo,
+    ExamVideoAnalysisResult,
     NotificationEvent,
     OperationalHealth,
     ReviewerAction,
@@ -41,6 +45,47 @@ from .services import agenda_for_student, calculate_risk_run, generate_due_notif
 def django_user(request):
     django_request = getattr(request, "_request", request)
     return get_user(django_request)
+
+
+def _media_path_from_uri(uri: str) -> str:
+    if not uri:
+        return ""
+    if uri.startswith(settings.MEDIA_URL):
+        relative = uri.removeprefix(settings.MEDIA_URL)
+        try:
+            return default_storage.path(relative)
+        except NotImplementedError:
+            return str(Path(settings.MEDIA_ROOT) / relative)
+    return uri
+
+
+def _latest_preview_path_for_video(video_id: int) -> str:
+    uri = (
+        ExamVideoAnalysisResult.objects.filter(exam_video_id=video_id)
+        .values_list("latest_preview_uri", flat=True)
+        .first()
+    )
+    return _media_path_from_uri(uri or "")
+
+
+def _exam_video_live_stream_response(video):
+    from .live_analysis_stream import mjpeg_stream
+
+    fallback_path = ""
+    result = getattr(video, "result", None)
+    if result and result.latest_preview_uri:
+        fallback_path = _media_path_from_uri(result.latest_preview_uri)
+    response = StreamingHttpResponse(
+        mjpeg_stream(
+            video.id,
+            fallback_path=fallback_path,
+            fallback_path_provider=lambda: _latest_preview_path_for_video(video.id),
+        ),
+        content_type="multipart/x-mixed-replace; boundary=frame",
+    )
+    response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response["X-Accel-Buffering"] = "no"
+    return response
 
 
 def is_authenticated_request(request):
@@ -378,7 +423,7 @@ class ApiV1DispatchView(SessionlessAPIView):
             if request.method == "GET":
                 if not has_role(request, UserProfile.ROLE_INVIGILATOR, UserProfile.ROLE_TEACHER):
                     return Response({"detail": "Only invigilators, teachers, or admins can monitor exam videos."}, status=status.HTTP_403_FORBIDDEN)
-                queryset = ExamVideo.objects.select_related("exam_session", "exam_session__course", "uploaded_by").order_by("-created_at")
+                queryset = ExamVideo.objects.select_related("exam_session", "exam_session__course", "uploaded_by", "result").order_by("-created_at")
                 if user_role(request) == UserProfile.ROLE_TEACHER and not is_admin_request(request):
                     queryset = queryset.filter(exam_session__course__teacher=django_user(request))
                 return Response(serializers.ExamVideoSerializer(queryset, many=True).data)
@@ -388,7 +433,86 @@ class ApiV1DispatchView(SessionlessAPIView):
                 serializer = serializers.ExamVideoSerializer(data=request.data, context={"request": request})
                 serializer.is_valid(raise_exception=True)
                 video = serializer.save()
-                return Response(serializers.ExamVideoSerializer(video).data, status=status.HTTP_201_CREATED)
+                payload = serializers.ExamVideoSerializer(video).data
+                return Response(payload, status=status.HTTP_201_CREATED)
+
+        if clean_path.startswith("exam-videos/"):
+            parts = clean_path.split("/")
+            if len(parts) == 3 and parts[2] == "live-stream" and request.method == "GET":
+                try:
+                    video_id = int(parts[1])
+                except ValueError:
+                    return Response({"detail": "Invalid exam video id."}, status=status.HTTP_404_NOT_FOUND)
+                video = ExamVideo.objects.select_related("result").filter(id=video_id).first()
+                if video is None:
+                    return Response({"detail": "Exam video not found."}, status=status.HTTP_404_NOT_FOUND)
+                return _exam_video_live_stream_response(video)
+
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if len(parts) not in {2, 3}:
+                return Response({"detail": "Invalid exam video endpoint."}, status=status.HTTP_404_NOT_FOUND)
+            try:
+                video_id = int(parts[1])
+            except ValueError:
+                return Response({"detail": "Invalid exam video id."}, status=status.HTTP_404_NOT_FOUND)
+
+            video = ExamVideo.objects.select_related("exam_session", "exam_session__course", "uploaded_by", "result").filter(id=video_id).first()
+            if video is None:
+                return Response({"detail": "Exam video not found."}, status=status.HTTP_404_NOT_FOUND)
+            if user_role(request) == UserProfile.ROLE_TEACHER and not is_admin_request(request) and video.exam_session.course.teacher_id != django_user(request).id:
+                return Response({"detail": "Teachers can access only their own exam videos."}, status=status.HTTP_403_FORBIDDEN)
+
+            if len(parts) == 3 and parts[2] == "analyze" and request.method == "POST":
+                if not has_role(request, UserProfile.ROLE_INVIGILATOR):
+                    return Response({"detail": "Only invigilators or admins can start video analysis."}, status=status.HTTP_403_FORBIDDEN)
+                if video.status == ExamVideo.STATUS_ANALYZING:
+                    started_at = video.analysis_started_at
+                    stale_cutoff = timezone.now() - timezone.timedelta(minutes=2)
+                    if started_at and started_at > stale_cutoff:
+                        return Response({"detail": "Analysis is already running."}, status=status.HTTP_409_CONFLICT)
+                if video.status == ExamVideo.STATUS_COMPLETED:
+                    return Response({"detail": "Analysis already completed for this video."}, status=status.HTTP_400_BAD_REQUEST)
+
+                video.status = ExamVideo.STATUS_ANALYZING
+                video.analysis_started_at = timezone.now()
+                video.analysis_completed_at = None
+                video.frames_analyzed = 0
+                video.duration_seconds = 0
+                video.analysis_report = {}
+                video.error_message = ""
+                ExamVideoAnalysisResult.objects.filter(exam_video=video).delete()
+                video._state.fields_cache.pop("result", None)
+                video.save(
+                    update_fields=[
+                        "status",
+                        "analysis_started_at",
+                        "analysis_completed_at",
+                        "frames_analyzed",
+                        "duration_seconds",
+                        "analysis_report",
+                        "error_message",
+                        "updated_at",
+                    ]
+                )
+
+                from .tasks import queue_exam_video_analysis
+
+                queue_info = queue_exam_video_analysis(video.id)
+                payload = serializers.ExamVideoSerializer(video).data
+                payload["analysis_queue"] = queue_info
+                return Response(payload)
+
+            if len(parts) == 2 and request.method == "DELETE":
+                if not has_role(request, UserProfile.ROLE_INVIGILATOR):
+                    return Response({"detail": "Only invigilators or admins can delete exam videos."}, status=status.HTTP_403_FORBIDDEN)
+                file_uri = video.file_uri
+                record_id = video.id
+                video.delete()
+                if file_uri and not file_uri.startswith(("http://", "https://", "/", "file://")) and default_storage.exists(file_uri):
+                    default_storage.delete(file_uri)
+                return Response({"deleted": True, "record_id": record_id})
 
         if clean_path == "at-risk":
             auth_error = self.auth_required(request)
@@ -1288,6 +1412,7 @@ def serialize_alert(alert, detail=False):
         },
         "confidenceScore": float(alert.confidence_score),
         "visibilityQuality": alert.visibility_quality,
+        "metadata": alert.metadata,
         "examSession": {
             "id": alert.exam_session.id,
             "course": alert.exam_session.course.code,
@@ -1295,6 +1420,13 @@ def serialize_alert(alert, detail=False):
             "hall": alert.exam_session.hall.name,
             "status": alert.exam_session.status,
         },
+        "examVideo": {
+            "id": alert.exam_video.id,
+            "originalFilename": alert.exam_video.original_filename,
+            "status": alert.exam_video.status,
+        }
+        if alert.exam_video
+        else None,
         "camera": {"id": alert.camera.id, "name": alert.camera.name, "status": alert.camera.status},
         "seat": {"id": alert.seat.id, "label": alert.seat.label} if alert.seat else None,
     }
@@ -1318,6 +1450,7 @@ def alerts(_request):
         "exam_session",
         "exam_session__course",
         "exam_session__hall",
+        "exam_video",
         "camera",
         "seat",
     ).prefetch_related("evidence_assets")
@@ -1329,6 +1462,7 @@ def alert_detail(_request, alert_id):
         "exam_session",
         "exam_session__course",
         "exam_session__hall",
+        "exam_video",
         "camera",
         "seat",
     ).prefetch_related("evidence_assets", "review_actions").get(id=alert_id)

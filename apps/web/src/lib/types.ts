@@ -81,6 +81,12 @@ export interface IntegrityAlertExamSession {
   status: string;
 }
 
+export interface IntegrityAlertExamVideo {
+  id: number;
+  originalFilename: string;
+  status: string;
+}
+
 export interface IntegrityAlertSummary {
   id: number;
   alertType: IntegrityAlertType;
@@ -91,7 +97,9 @@ export interface IntegrityAlertSummary {
   window: IntegrityAlertWindow;
   confidenceScore: number;
   visibilityQuality: string;
+  metadata: Record<string, JsonValue>;
   examSession: IntegrityAlertExamSession;
+  examVideo: IntegrityAlertExamVideo | null;
   camera: IntegrityAlertCamera;
   seat: IntegrityAlertSeat | null;
 }
@@ -664,6 +672,48 @@ export interface ExamAttemptSummary {
   status: "started" | "submitted" | "reviewed";
   answers: Record<string, JsonValue>;
   submitted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExamVideoAnalysisResult {
+  id: number;
+  model_name: string;
+  report_uri: string;
+  session_uri: string;
+  annotated_video_uri: string;
+  latest_preview_uri: string;
+  frames_analyzed: number;
+  current_frame: number;
+  total_frames: number;
+  progress_percent: number;
+  duration_seconds: string;
+  total_alerts: number;
+  alert_counts: Record<string, JsonValue>;
+  latest_status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExamVideoSummary {
+  id: number;
+  exam_session: number;
+  exam_course: string;
+  uploaded_by: number | null;
+  uploaded_by_username: string | null;
+  original_filename: string;
+  file_uri: string;
+  file_url: string;
+  status: "uploaded" | "analyzing" | "completed" | "failed";
+  notes: string;
+  analysis_started_at: string | null;
+  analysis_completed_at: string | null;
+  frames_analyzed: number;
+  duration_seconds: string;
+  error_message: string;
+  analysis_report: Record<string, JsonValue>;
+  result: ExamVideoAnalysisResult | null;
+  alert_count: number;
   created_at: string;
   updated_at: string;
 }

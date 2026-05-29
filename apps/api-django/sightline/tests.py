@@ -1,8 +1,21 @@
+from unittest.mock import patch
+
 from django.core.management import call_command
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
 from django.utils import timezone
 
-from .models import Course, CourseMaterial, ExamAttempt, ExamSession, NotificationEvent, StudentRiskScore
+from .exam_detection.config import CFG
+from .models import (
+    Course,
+    CourseMaterial,
+    ExamAttempt,
+    ExamSession,
+    ExamVideo,
+    ExamVideoAnalysisResult,
+    NotificationEvent,
+    StudentRiskScore,
+)
 
 
 class SightlineApiSmokeTests(TestCase):
@@ -146,6 +159,88 @@ class SightlineApiSmokeTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+    def test_invigilator_can_upload_exam_video_then_start_analysis(self):
+        self.assertTrue(self.client.login(username="invigilator", password="sightline"))
+        upload = SimpleUploadedFile("exam-room.mp4", b"not-a-real-video", content_type="video/mp4")
+
+        response = self.client.post(
+            "/api/v1/exam-videos",
+            data={"file": upload, "notes": "Room A"},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        video = ExamVideo.objects.get(original_filename="exam-room.mp4")
+        self.assertEqual(video.uploaded_by.username, "invigilator")
+        self.assertEqual(video.exam_session.quiz_title, "Uploaded Video Review")
+        self.assertEqual(video.status, ExamVideo.STATUS_UPLOADED)
+        self.assertTrue(video.file_uri.startswith("exam_videos/"))
+
+        with patch("sightline.tasks.queue_exam_video_analysis", return_value={"mode": "realtime-thread", "task_id": None}) as queue:
+            start_response = self.client.post(f"/api/v1/exam-videos/{video.id}/analyze")
+
+        self.assertEqual(start_response.status_code, 200)
+        video.refresh_from_db()
+        self.assertEqual(video.status, ExamVideo.STATUS_ANALYZING)
+        queue.assert_called_once_with(video.id)
+
+    def test_invigilator_can_delete_exam_video(self):
+        self.assertTrue(self.client.login(username="invigilator", password="sightline"))
+        upload = SimpleUploadedFile("delete-me.mp4", b"not-a-real-video", content_type="video/mp4")
+        response = self.client.post("/api/v1/exam-videos", data={"file": upload})
+        self.assertEqual(response.status_code, 201)
+        video_id = response.json()["id"]
+
+        delete_response = self.client.delete(f"/api/v1/exam-videos/{video_id}")
+
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertFalse(ExamVideo.objects.filter(id=video_id).exists())
+
+    def test_exam_video_list_includes_analysis_result(self):
+        self.assertTrue(self.client.login(username="invigilator", password="sightline"))
+        exam_session = ExamSession.objects.get(course__code="CSE-321")
+        video = ExamVideo.objects.create(
+            exam_session=exam_session,
+            uploaded_by=None,
+            original_filename="result-video.mp4",
+            file_uri="file://result-video.mp4",
+            status=ExamVideo.STATUS_COMPLETED,
+            frames_analyzed=12,
+        )
+        ExamVideoAnalysisResult.objects.create(
+            exam_video=video,
+            model_name="yolov8s",
+            report_uri="/media/evidence/session_report.json",
+            annotated_video_uri="/media/evidence/annotated_analysis.mp4",
+            frames_analyzed=12,
+            total_alerts=2,
+            alert_counts={"phone": 1, "talking": 1},
+            report_payload={"total_alerts": 2},
+        )
+
+        response = self.client.get("/api/v1/exam-videos")
+
+        self.assertEqual(response.status_code, 200)
+        row = next(item for item in response.json() if item["id"] == video.id)
+        self.assertEqual(row["result"]["model_name"], "yolov8s")
+        self.assertEqual(row["result"]["total_alerts"], 2)
+
+    def test_yolo_default_model_is_v8s(self):
+        self.assertEqual(CFG._clean_model_size(None), "s")
+        self.assertEqual(CFG.detector_label(), "yolov8s")
+        self.assertTrue(CFG.det_model_name().endswith("yolov8s.pt"))
+        self.assertTrue(CFG.pose_model_name().endswith("yolov8s-pose.pt"))
+
+    def test_exam_video_analysis_queue_uses_realtime_thread(self):
+        from . import tasks
+
+        with patch.object(tasks._analysis_executor, "submit") as submit:
+            submit.return_value = object()
+            queue_info = tasks.queue_exam_video_analysis(123)
+
+        self.assertEqual(queue_info["mode"], "realtime-thread")
+        self.assertIsNone(queue_info["task_id"])
+        submit.assert_called_once_with(tasks._run_threaded_analysis, 123)
 
     def test_teacher_can_run_at_risk_analysis_for_own_course(self):
         self.assertTrue(self.client.login(username="teacher", password="sightline"))

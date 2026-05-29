@@ -29,6 +29,7 @@ venv/
 db.sqlite3
 *.sqlite3
 *.log
+apps/api-django/media/
 
 # OS and editor noise
 .DS_Store

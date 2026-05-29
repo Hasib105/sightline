@@ -17,6 +17,7 @@ for model in [
     models.Seat,
     models.ExamSession,
     models.ExamVideo,
+    models.ExamVideoAnalysisResult,
     models.ExamAttempt,
     models.AlertEvent,
     models.EvidenceAsset,

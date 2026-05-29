@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, RefreshCcw, ShieldCheck, UserRoundCheck } from "lucide-react";
+import { CheckCircle2, Eye, FileVideo, Loader2, PlayCircle, RefreshCcw, Trash2, Upload } from "lucide-react";
 
 import {
   ConsoleEmptyState,
@@ -11,273 +12,490 @@ import {
   ConsoleStat,
   DataTable,
   StatusBadge,
+  consoleInputClass,
   consoleTableCellClass,
   consoleTableHeaderCellClass,
 } from "@/components/dashboard/console";
-import { Button } from "@/components/ui/button";
-import { ApiError, getIntegrityAlert, listIntegrityAlerts, reviewIntegrityAlert } from "@/lib/dashboard-api";
-import type { IntegrityAlertDetail, IntegrityAlertSummary } from "@/lib/types";
-
-const reviewTone: Record<string, "success" | "warning" | "muted"> = {
-  confirmed: "success",
-  dismissed: "muted",
-  follow_up: "warning",
-};
-
-const statusTone: Record<string, "success" | "warning" | "muted"> = {
-  detected: "warning",
-  visible: "warning",
-  confirmed: "success",
-  dismissed: "muted",
-  follow_up: "warning",
-  closed: "muted",
-};
-
-function formatPercent(value: number) {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value * 100);
-}
+import { Button, buttonVariants } from "@/components/ui/button";
+import { apiBaseUrl, apiMediaBaseUrl, apiWebSocketBaseUrl } from "@/lib/api-base-url";
+import { deleteExamVideo, listExamVideos, startExamVideoAnalysis, uploadExamVideo } from "@/lib/dashboard-api";
+import type { ExamVideoSummary, JsonValue } from "@/lib/types";
 
 function labelize(value: string) {
   return value.replaceAll("_", " ");
 }
 
-function alertLabel(alert: IntegrityAlertSummary | IntegrityAlertDetail) {
-  return alert.alertTypeLabel || labelize(alert.alertType);
+function videoStatusTone(status: ExamVideoSummary["status"]): "success" | "warning" | "danger" | "muted" {
+  if (status === "completed") return "success";
+  if (status === "failed") return "danger";
+  if (status === "analyzing" || status === "uploaded") return "warning";
+  return "muted";
+}
+
+function videoUrl(video: ExamVideoSummary) {
+  const uri = video.file_url || video.file_uri;
+  return absoluteMediaUrl(uri);
+}
+
+function analysisVideoUrl(video: ExamVideoSummary) {
+  const annotatedUrl =
+    video.result?.annotated_video_uri ||
+    stringValue(video.analysis_report.annotated_video_url) ||
+    stringValue(video.analysis_report.annotated_video_path);
+  return annotatedUrl ? absoluteMediaUrl(annotatedUrl) : videoUrl(video);
+}
+
+function livePreviewUrl(video: ExamVideoSummary) {
+  const previewUrl =
+    video.result?.latest_preview_uri ||
+    stringValue(video.analysis_report.latest_preview_url) ||
+    stringValue(video.analysis_report.latest_preview_uri);
+  if (!previewUrl) {
+    return "";
+  }
+  const cacheKey = video.result?.updated_at || video.updated_at;
+  return `${absoluteMediaUrl(previewUrl)}${previewUrl.includes("?") ? "&" : "?"}t=${encodeURIComponent(cacheKey)}`;
+}
+
+function liveAnalysisWebSocketUrl(videoId: number, analysisStartedAt: string | null) {
+  const cacheKey = analysisStartedAt || String(videoId);
+  return `${apiWebSocketBaseUrl()}/ws/exam-videos/${videoId}/analysis/?t=${encodeURIComponent(cacheKey)}`;
+}
+
+function absoluteMediaUrl(uri: string) {
+  if (uri.startsWith("http://") || uri.startsWith("https://")) {
+    return uri;
+  }
+  if (uri.startsWith("/media/")) {
+    return `${apiMediaBaseUrl()}${uri}`;
+  }
+  if (uri.startsWith("/")) {
+    return `${apiBaseUrl()}${uri}`;
+  }
+  return uri;
+}
+
+function stringValue(value: JsonValue | undefined) {
+  return typeof value === "string" ? value : "";
+}
+
+function LiveAnalysisCanvas({
+  fallbackSrc,
+  video,
+}: {
+  fallbackSrc: string;
+  video: ExamVideoSummary;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [hasFrame, setHasFrame] = useState(false);
+  const [connectionLabel, setConnectionLabel] = useState("Connecting to live analysis");
+  const videoId = video.id;
+  const analysisStartedAt = video.analysis_started_at;
+  const socketUrl = useMemo(
+    () => liveAnalysisWebSocketUrl(videoId, analysisStartedAt),
+    [videoId, analysisStartedAt]
+  );
+
+  useEffect(() => {
+    const socket = new WebSocket(socketUrl);
+    let closed = false;
+    let activeObjectUrl = "";
+
+    socket.binaryType = "blob";
+
+    socket.onopen = () => setConnectionLabel("Waiting for analyzed frames");
+    socket.onerror = () => setConnectionLabel("Live connection failed");
+    socket.onclose = () => {
+      if (!closed) {
+        setConnectionLabel("Live connection closed");
+      }
+    };
+    socket.onmessage = (event) => {
+      if (typeof event.data === "string") {
+        try {
+          const payload = JSON.parse(event.data) as { type?: string; latest_status?: string };
+          if (payload.latest_status) {
+            setConnectionLabel(payload.latest_status);
+          } else if (payload.type === "complete") {
+            setConnectionLabel("Analysis complete");
+          }
+        } catch {
+          setConnectionLabel("Live analysis running");
+        }
+        return;
+      }
+
+      const objectUrl = URL.createObjectURL(event.data as Blob);
+      activeObjectUrl = objectUrl;
+      const image = new Image();
+      image.onload = () => {
+        const canvas = canvasRef.current;
+        if (!canvas) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        canvas.width = image.naturalWidth || image.width;
+        canvas.height = image.naturalHeight || image.height;
+        const context = canvas.getContext("2d");
+        context?.drawImage(image, 0, 0, canvas.width, canvas.height);
+        setHasFrame(true);
+        URL.revokeObjectURL(objectUrl);
+        if (activeObjectUrl === objectUrl) {
+          activeObjectUrl = "";
+        }
+      };
+      image.onerror = () => URL.revokeObjectURL(objectUrl);
+      image.src = objectUrl;
+    };
+
+    return () => {
+      closed = true;
+      socket.close();
+      if (activeObjectUrl) {
+        URL.revokeObjectURL(activeObjectUrl);
+      }
+    };
+  }, [socketUrl]);
+
+  return (
+    <div className="relative aspect-video w-full overflow-hidden rounded-md border border-[var(--dashboard-border)] bg-black">
+      {fallbackSrc && !hasFrame ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img alt="Latest analyzed frame" className="absolute inset-0 size-full object-contain" src={fallbackSrc} />
+      ) : null}
+      <canvas ref={canvasRef} className="absolute inset-0 size-full object-contain" />
+      {!hasFrame ? (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-white/75">
+          <span className="inline-flex items-center gap-2 rounded-md bg-black/45 px-3 py-2">
+            <Loader2 className="size-4 animate-spin" />
+            {connectionLabel}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export default function InvigilatorDashboardPage() {
   const queryClient = useQueryClient();
-  const alertsQuery = useQuery({
-    queryKey: ["integrity-alerts"],
-    queryFn: listIntegrityAlerts,
+  const videosQuery = useQuery({
+    queryKey: ["exam-videos"],
+    queryFn: listExamVideos,
+    refetchInterval: (query) => {
+      const videos = query.state.data ?? [];
+      return videos.some((video) => video.status === "analyzing") ? 1500 : false;
+    },
   });
-  const alerts = useMemo(() => alertsQuery.data ?? [], [alertsQuery.data]);
-  const [selectedAlertId, setSelectedAlertId] = useState<number | null>(null);
-  const [reviewerUsername, setReviewerUsername] = useState("invigilator");
-  const [note, setNote] = useState("Reviewed in invigilator console.");
+  const videos = useMemo(() => videosQuery.data ?? [], [videosQuery.data]);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [uploadNote, setUploadNote] = useState("");
+  const [selectedVideoId, setSelectedVideoId] = useState<number | null>(null);
 
-  const activeAlertId = selectedAlertId ?? alerts[0]?.id ?? null;
-  const selectedAlertQuery = useQuery<IntegrityAlertDetail>({
-    queryKey: ["integrity-alert", activeAlertId],
-    queryFn: () => getIntegrityAlert(activeAlertId as number),
-    enabled: activeAlertId !== null,
-  });
-  const selectedAlert = selectedAlertQuery.data ?? null;
-
-  const reviewMutation = useMutation({
-    mutationFn: ({ alertId, decision }: { alertId: number; decision: "confirmed" | "dismissed" | "follow_up" }) =>
-      reviewIntegrityAlert(alertId, {
-        decision,
-        reviewerUsername: reviewerUsername.trim() || "invigilator",
-        note: note.trim(),
-      }),
-    onSuccess: async (alert) => {
-      setSelectedAlertId(alert.id);
-      await queryClient.invalidateQueries({ queryKey: ["integrity-alerts"] });
+  const uploadMutation = useMutation({
+    mutationFn: () => {
+      if (!videoFile) {
+        throw new Error("Select a video file.");
+      }
+      return uploadExamVideo({ file: videoFile, notes: uploadNote.trim() });
+    },
+    onSuccess: async (video) => {
+      setSelectedVideoId(video.id);
+      setVideoFile(null);
+      setUploadNote("");
+      await queryClient.invalidateQueries({ queryKey: ["exam-videos"] });
     },
   });
 
-  const openAlerts = alerts.filter((alert) => alert.status === "detected" || alert.status === "visible").length;
-  const reviewedAlerts = alerts.filter((alert) => ["confirmed", "dismissed", "follow_up", "closed"].includes(alert.status)).length;
+  const startMutation = useMutation({
+    mutationFn: startExamVideoAnalysis,
+    onSuccess: async (video) => {
+      setSelectedVideoId(video.id);
+      await queryClient.invalidateQueries({ queryKey: ["exam-videos"] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteExamVideo,
+    onSuccess: async (result) => {
+      if (selectedVideoId === result.record_id) {
+        setSelectedVideoId(null);
+      }
+      await queryClient.invalidateQueries({ queryKey: ["exam-videos"] });
+    },
+  });
+
+  const queuedVideos = videos.filter((video) => video.status === "uploaded").length;
+  const analyzingVideos = videos.filter((video) => video.status === "analyzing").length;
+  const completedVideos = videos.filter((video) => video.status === "completed").length;
+  const failedVideos = videos.filter((video) => video.status === "failed").length;
+  const latestCompletedVideo = videos.find((video) => video.status === "completed");
+  const selectedVideo = videos.find((video) => video.id === selectedVideoId) ?? videos[0] ?? null;
+  const selectedLivePreview = selectedVideo ? livePreviewUrl(selectedVideo) : "";
+
+  const deleteVideo = (video: ExamVideoSummary) => {
+    if (window.confirm(`Delete ${video.original_filename}?`)) {
+      deleteMutation.mutate(video.id);
+    }
+  };
 
   return (
     <ConsolePage
       eyebrow="Invigilator"
-      title="Alert review"
-      description="Review evidence-backed exam integrity alerts and record the human decision."
+      title="Video analysis"
+      description="Upload an exam video, let Sightline run analysis, then open the completed result on its own review page."
       meta={
         <>
-          <span>{alerts.length} alerts</span>
-          <span>{openAlerts} open</span>
+          <span>{videos.length} videos</span>
+          <span>{queuedVideos} uploaded</span>
+          <span>{analyzingVideos} analyzing</span>
+          <span>{completedVideos} completed</span>
         </>
       }
       actions={
-        <Button size="sm" variant="outline" onClick={() => void alertsQuery.refetch()} disabled={alertsQuery.isFetching}>
-          {alertsQuery.isFetching ? <Loader2 className="size-4 animate-spin" /> : <RefreshCcw className="size-4" />}
+        <Button size="sm" variant="outline" onClick={() => void videosQuery.refetch()} disabled={videosQuery.isFetching}>
+          {videosQuery.isFetching ? <Loader2 className="size-4 animate-spin" /> : <RefreshCcw className="size-4" />}
           Refresh
         </Button>
       }
     >
-      <div className="grid gap-2 md:grid-cols-3">
-        <ConsoleStat label="Alerts" value={alerts.length} description="Integrity alerts in the queue" />
-        <ConsoleStat label="Open" value={openAlerts} description="Need a human decision" />
-        <ConsoleStat label="Reviewed" value={reviewedAlerts} description="Confirmed, dismissed, or follow-up" />
+      <div className="grid gap-2 md:grid-cols-4">
+        <ConsoleStat label="Video jobs" value={videos.length} description="Uploaded files in the queue" />
+        <ConsoleStat label="Uploaded" value={queuedVideos} description="Ready to start analysis" />
+        <ConsoleStat label="Analyzing" value={analyzingVideos} description="Currently running" />
+        <ConsoleStat label="Completed" value={completedVideos} description="Ready to review on result page" />
+        <ConsoleStat label="Failed" value={failedVideos} description="Can be restarted or deleted" />
       </div>
 
-      {alertsQuery.isLoading ? (
-        <div className="flex items-center justify-center p-10">
-          <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      {latestCompletedVideo ? (
+        <div className="flex flex-col gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-2">
+            <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+            <div className="min-w-0">
+              <p className="font-medium">Analysis complete</p>
+              <p className="truncate text-xs opacity-80">
+                {latestCompletedVideo.original_filename} is ready with {latestCompletedVideo.result?.total_alerts ?? latestCompletedVideo.alert_count} alert{(latestCompletedVideo.result?.total_alerts ?? latestCompletedVideo.alert_count) === 1 ? "" : "s"}.
+              </p>
+            </div>
+          </div>
+          <Link
+            href={`/dashboard/invigilator/results/${latestCompletedVideo.id}`}
+            className={buttonVariants({
+              size: "sm",
+              variant: "outline",
+              className: "border-emerald-300 bg-white/70 text-emerald-800 hover:bg-white dark:border-emerald-500/40 dark:bg-transparent dark:text-emerald-100",
+            })}
+          >
+            <Eye className="size-4" />
+            View result
+          </Link>
         </div>
-      ) : alertsQuery.error ? (
-        <p className="text-sm text-red-600">{(alertsQuery.error as ApiError).message}</p>
-      ) : alerts.length === 0 ? (
-        <ConsoleEmptyState
-          title="No alerts yet"
-          description="Use the integrity simulation endpoint or wait for live analysis output."
-          icon={ShieldCheck}
-        />
-      ) : (
-        <div className="grid gap-3 xl:grid-cols-[minmax(0,1.3fr)_minmax(22rem,0.7fr)]">
-          <ConsolePanel title="Alerts" description="Latest integrity events with evidence links.">
-            <DataTable storageKey="invigilator-alerts" searchPlaceholder="Search alerts..." pageSizeOptions={[5, 10, 20]}>
+      ) : null}
+
+      {selectedVideo ? (
+        <ConsolePanel
+          title="Uploaded video"
+          description="Preview the selected video, then start analysis when ready."
+          actions={
+            <>
+              {selectedVideo.status === "uploaded" || selectedVideo.status === "failed" ? (
+                <Button
+                  size="sm"
+                  onClick={() => startMutation.mutate(selectedVideo.id)}
+                  disabled={startMutation.isPending}
+                >
+                  {startMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <PlayCircle className="size-4" />}
+                  Start analysis
+                </Button>
+              ) : null}
+              {selectedVideo.status === "completed" ? (
+                <Link
+                  href={`/dashboard/invigilator/results/${selectedVideo.id}`}
+                  className={buttonVariants({ size: "sm", variant: "outline" })}
+                >
+                  <Eye className="size-4" />
+                  Result
+                </Link>
+              ) : null}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => deleteVideo(selectedVideo)}
+                disabled={deleteMutation.isPending}
+              >
+                {deleteMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                Delete
+              </Button>
+            </>
+          }
+          contentClassName="space-y-3"
+        >
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
+            {selectedVideo.status === "analyzing" ? (
+              <LiveAnalysisCanvas
+                key={`${selectedVideo.id}-${selectedVideo.analysis_started_at ?? "pending"}`}
+                fallbackSrc={selectedLivePreview}
+                video={selectedVideo}
+              />
+            ) : (
+              <video
+                className="aspect-video w-full rounded-md border border-[var(--dashboard-border)] bg-black"
+                controls
+                preload="metadata"
+                src={selectedVideo.status === "completed" ? analysisVideoUrl(selectedVideo) : videoUrl(selectedVideo)}
+              />
+            )}
+            <div className="space-y-3 rounded-md border border-[var(--dashboard-border)] bg-[var(--dashboard-panel-muted)] p-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">{selectedVideo.original_filename}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{selectedVideo.exam_course} · {new Date(selectedVideo.created_at).toLocaleString()}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {selectedVideo.status === "analyzing"
+                    ? "Showing live analyzed frames with boxes and labels."
+                    : selectedVideo.status === "completed"
+                      ? "Showing analyzed video with boxes and labels."
+                      : "Showing uploaded source video."}
+                </p>
+              </div>
+              <StatusBadge label={labelize(selectedVideo.status)} tone={videoStatusTone(selectedVideo.status)} />
+              <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                <div className="rounded-md border border-[var(--dashboard-border)] bg-card p-2">
+                  <p className="font-medium text-foreground">{selectedVideo.result?.frames_analyzed ?? selectedVideo.frames_analyzed}</p>
+                  <p>Frames</p>
+                </div>
+                <div className="rounded-md border border-[var(--dashboard-border)] bg-card p-2">
+                  <p className="font-medium text-foreground">{selectedVideo.result?.total_alerts ?? selectedVideo.alert_count}</p>
+                  <p>Alerts</p>
+                </div>
+              </div>
+              {selectedVideo.status === "analyzing" && selectedVideo.result ? (
+                <div className="space-y-1 text-xs text-muted-foreground">
+                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full bg-[var(--dashboard-accent)] transition-all"
+                      style={{ width: `${Math.min(100, Math.max(0, selectedVideo.result.progress_percent))}%` }}
+                    />
+                  </div>
+                  <p>{selectedVideo.result.latest_status || "Analysis running"}</p>
+                </div>
+              ) : null}
+              {selectedVideo.error_message ? <p className="text-xs text-red-600">{selectedVideo.error_message}</p> : null}
+            </div>
+          </div>
+          {startMutation.error ? <p className="text-sm text-red-600">{(startMutation.error as Error).message}</p> : null}
+          {deleteMutation.error ? <p className="text-sm text-red-600">{(deleteMutation.error as Error).message}</p> : null}
+        </ConsolePanel>
+      ) : null}
+
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)]">
+        <ConsolePanel title="Upload video" description="Select a recorded exam video. Analysis starts only when you press Start." contentClassName="space-y-3">
+          <label className="block space-y-1 text-sm">
+            <span className="font-medium text-foreground">Video file</span>
+            <input
+              className={consoleInputClass}
+              type="file"
+              accept="video/mp4,video/quicktime,video/x-matroska,video/x-msvideo"
+              disabled={uploadMutation.isPending}
+              onChange={(event) => setVideoFile(event.target.files?.[0] ?? null)}
+            />
+          </label>
+          <label className="block space-y-1 text-sm">
+            <span className="font-medium text-foreground">Notes</span>
+            <input
+              className={consoleInputClass}
+              value={uploadNote}
+              onChange={(event) => setUploadNote(event.target.value)}
+              placeholder="Optional context"
+              disabled={uploadMutation.isPending}
+            />
+          </label>
+          <Button
+            size="sm"
+            disabled={!videoFile || uploadMutation.isPending}
+            onClick={() => uploadMutation.mutate()}
+          >
+            {uploadMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+            Upload video
+          </Button>
+          {uploadMutation.error ? <p className="text-sm text-red-600">{(uploadMutation.error as Error).message}</p> : null}
+        </ConsolePanel>
+
+        <ConsolePanel title="Video jobs" description="Uploaded videos and background analysis status.">
+          {videosQuery.isLoading ? (
+            <div className="flex items-center justify-center p-8">
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : videos.length === 0 ? (
+            <ConsoleEmptyState title="No videos uploaded" description="Uploaded exam videos will appear here." icon={FileVideo} />
+          ) : (
+            <DataTable storageKey="invigilator-videos" searchPlaceholder="Search videos..." pageSizeOptions={[5, 10, 20]} chrome="compact">
               <thead>
                 <tr>
-                  <th className={consoleTableHeaderCellClass}>Alert</th>
-                  <th className={consoleTableHeaderCellClass}>Course</th>
+                  <th className={consoleTableHeaderCellClass}>Video</th>
                   <th className={consoleTableHeaderCellClass}>Status</th>
-                  <th className={consoleTableHeaderCellClass}>Action</th>
+                  <th className={consoleTableHeaderCellClass}>Frames</th>
+                  <th className={consoleTableHeaderCellClass}>Alerts</th>
+                  <th className={consoleTableHeaderCellClass}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {alerts.map((alert) => (
-                  <tr key={alert.id} className={selectedAlert?.id === alert.id ? "bg-[var(--dashboard-accent-soft)]/40" : "hover:bg-muted/40"}>
+                {videos.map((video) => (
+                  <tr key={video.id} className={selectedVideo?.id === video.id ? "bg-[var(--dashboard-accent-soft)]/40" : "hover:bg-muted/40"}>
                     <td className={consoleTableCellClass}>
-                      <button type="button" className="block text-left" onClick={() => setSelectedAlertId(alert.id)}>
-                        <div className="font-medium text-foreground">{alertLabel(alert)}</div>
-                        <div className="mt-1 text-xs text-muted-foreground">{alert.summary}</div>
-                        <div className="mt-1 text-[11px] text-muted-foreground">{new Date(alert.occurredAt).toLocaleString()}</div>
+                      <button type="button" className="block text-left" onClick={() => setSelectedVideoId(video.id)}>
+                        <div className="font-medium text-foreground">{video.original_filename}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">{video.exam_course} · {new Date(video.created_at).toLocaleString()}</div>
                       </button>
+                      {video.error_message ? <div className="mt-1 text-xs text-red-600">{video.error_message}</div> : null}
                     </td>
                     <td className={consoleTableCellClass}>
-                      <div className="font-medium text-foreground">{alert.examSession.course}</div>
-                      <div className="text-xs text-muted-foreground">{alert.examSession.courseTitle}</div>
+                      <StatusBadge label={labelize(video.status)} tone={videoStatusTone(video.status)} />
                     </td>
+                    <td className={consoleTableCellClass}>{video.result?.frames_analyzed ?? video.frames_analyzed}</td>
+                    <td className={consoleTableCellClass}>{video.result?.total_alerts ?? video.alert_count}</td>
                     <td className={consoleTableCellClass}>
-                      <StatusBadge label={labelize(alert.status)} tone={statusTone[alert.status] ?? "muted"} />
-                    </td>
-                    <td className={consoleTableCellClass}>
-                      <Button size="sm" variant="outline" onClick={() => setSelectedAlertId(alert.id)}>
-                        Review
+                      <div className="flex flex-wrap gap-2">
+                      {video.status === "uploaded" || video.status === "failed" ? (
+                        <Button
+                          size="sm"
+                          onClick={() => startMutation.mutate(video.id)}
+                          disabled={startMutation.isPending}
+                        >
+                          {startMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <PlayCircle className="size-4" />}
+                          Start
+                        </Button>
+                      ) : null}
+                      {video.status === "completed" ? (
+                        <Link
+                          href={`/dashboard/invigilator/results/${video.id}`}
+                          className={buttonVariants({ size: "sm", variant: "outline" })}
+                        >
+                          <Eye className="size-4" />
+                          View
+                        </Link>
+                      ) : video.status === "analyzing" ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                          <Loader2 className="size-3 animate-spin" />
+                          Processing
+                        </span>
+                      ) : null}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => deleteVideo(video)}
+                        disabled={deleteMutation.isPending}
+                      >
+                        <Trash2 className="size-4" />
+                        Delete
                       </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </DataTable>
-          </ConsolePanel>
-
-          <ConsolePanel
-            title={selectedAlert ? `Alert ${selectedAlert.id}` : "Select an alert"}
-            description={selectedAlert ? selectedAlert.summary : "Choose an alert to inspect the evidence and review history."}
-            contentClassName="space-y-3"
-          >
-            {selectedAlert ? (
-              <>
-                <div className="grid gap-2 md:grid-cols-2">
-                  <div className="rounded-md border border-[var(--dashboard-border)] bg-[var(--dashboard-panel-muted)] p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Exam session</p>
-                    <p className="mt-1 text-sm font-medium text-foreground">{selectedAlert.examSession.course} · {selectedAlert.examSession.courseTitle}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Hall {selectedAlert.examSession.hall} · {selectedAlert.examSession.status}</p>
-                  </div>
-                  <div className="rounded-md border border-[var(--dashboard-border)] bg-[var(--dashboard-panel-muted)] p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Confidence</p>
-                    <p className="mt-1 text-sm font-medium text-foreground">{formatPercent(selectedAlert.confidenceScore)}%</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Visibility: {selectedAlert.visibilityQuality}</p>
-                  </div>
-                </div>
-
-                <div className="space-y-2 rounded-md border border-[var(--dashboard-border)] bg-[var(--dashboard-panel-muted)] p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Evidence</p>
-                      <p className="text-sm text-foreground">Linked assets remain available after review.</p>
-                    </div>
-                    <StatusBadge label={selectedAlert.alertTypeLabel} tone="warning" />
-                  </div>
-
-                  {selectedAlert.evidenceAssets.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No evidence assets attached.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {selectedAlert.evidenceAssets.map((asset) => (
-                        <div key={asset.id} className="rounded-md border border-[var(--dashboard-border)] bg-card p-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <div>
-                              <p className="text-sm font-medium text-foreground">{labelize(asset.kind)}</p>
-                              <p className="text-xs text-muted-foreground">{asset.uri}</p>
-                            </div>
-                            <StatusBadge label={asset.kind} tone="muted" />
-                          </div>
-                          <p className="mt-2 text-xs text-muted-foreground">Captured {new Date(asset.capturedAt).toLocaleString()} · {asset.qualityNote}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-2 rounded-md border border-[var(--dashboard-border)] bg-[var(--dashboard-panel-muted)] p-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Review</p>
-                  <label className="block space-y-1 text-sm">
-                    <span className="font-medium">Reviewer username</span>
-                    <input
-                      className="h-8 w-full rounded-md border border-[var(--dashboard-border)] bg-card px-2.5 text-sm text-foreground outline-none focus-visible:border-[var(--dashboard-accent)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--dashboard-accent)_18%,transparent)]"
-                      value={reviewerUsername}
-                      onChange={(event) => setReviewerUsername(event.target.value)}
-                    />
-                  </label>
-                  <label className="block space-y-1 text-sm">
-                    <span className="font-medium">Note</span>
-                    <textarea
-                      className="min-h-[92px] w-full rounded-md border border-[var(--dashboard-border)] bg-card px-3 py-2 text-sm text-foreground outline-none focus-visible:border-[var(--dashboard-accent)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--dashboard-accent)_18%,transparent)]"
-                      value={note}
-                      onChange={(event) => setNote(event.target.value)}
-                    />
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      disabled={reviewMutation.isPending}
-                      onClick={() => reviewMutation.mutate({ alertId: selectedAlert.id, decision: "confirmed" })}
-                    >
-                      {reviewMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <UserRoundCheck className="size-4" />}
-                      Confirm
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={reviewMutation.isPending}
-                      onClick={() => reviewMutation.mutate({ alertId: selectedAlert.id, decision: "dismissed" })}
-                    >
-                      Dismiss
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={reviewMutation.isPending}
-                      onClick={() => reviewMutation.mutate({ alertId: selectedAlert.id, decision: "follow_up" })}
-                    >
-                      Follow up
-                    </Button>
-                  </div>
-                  {reviewMutation.error ? <p className="text-sm text-red-600">{(reviewMutation.error as ApiError).message}</p> : null}
-                </div>
-
-                <div className="space-y-2 rounded-md border border-[var(--dashboard-border)] bg-[var(--dashboard-panel-muted)] p-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Review history</p>
-                  {selectedAlert.reviewActions.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No reviews recorded yet.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {selectedAlert.reviewActions.map((action) => (
-                        <div key={action.id} className="rounded-md border border-[var(--dashboard-border)] bg-card p-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm font-medium text-foreground">{action.reviewer}</p>
-                            <StatusBadge label={labelize(action.decision)} tone={reviewTone[action.decision] ?? "muted"} />
-                          </div>
-                          <p className="mt-1 text-xs text-muted-foreground">{new Date(action.createdAt).toLocaleString()}</p>
-                          {action.note ? <p className="mt-2 text-sm text-muted-foreground">{action.note}</p> : null}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </>
-            ) : (
-              <ConsoleEmptyState title="Pick an alert" description="Use the table to inspect the evidence and record the human decision." icon={ShieldCheck} />
-            )}
-          </ConsolePanel>
-        </div>
-      )}
+          )}
+        </ConsolePanel>
+      </div>
     </ConsolePage>
   );
 }

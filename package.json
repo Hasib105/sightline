@@ -9,11 +9,11 @@
     "packages/*"
   ],
   "scripts": {
-    "api:install": "python -m pip install -r apps/api-django/requirements.txt",
-    "api:makemigrations": "python apps/api-django/manage.py makemigrations sightline",
-    "api:migrate": "python apps/api-django/manage.py migrate",
-    "api:seed": "python apps/api-django/manage.py seed_sightline",
-    "api:dev": "python apps/api-django/manage.py runserver 127.0.0.1:8000",
+    "api:install": "uv sync",
+    "api:makemigrations": "uv run python apps/api-django/manage.py makemigrations sightline",
+    "api:migrate": "uv run python apps/api-django/manage.py migrate",
+    "api:seed": "uv run python apps/api-django/manage.py seed_sightline",
+    "api:dev": "uv run uvicorn sightline_api.asgi:application --app-dir apps/api-django --host 127.0.0.1 --port 8000",
     "backend:install": "pnpm run api:install",
     "web:install": "pnpm install --filter sightline-web",
     "web:dev": "pnpm --filter sightline-web dev",

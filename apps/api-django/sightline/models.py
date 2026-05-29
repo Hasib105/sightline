@@ -217,9 +217,39 @@ class ExamVideo(TimestampedModel):
     file_uri = models.CharField(max_length=300)
     status = models.CharField(max_length=24, choices=STATUS_CHOICES, default=STATUS_UPLOADED)
     notes = models.TextField(blank=True)
+    analysis_started_at = models.DateTimeField(null=True, blank=True)
+    analysis_completed_at = models.DateTimeField(null=True, blank=True)
+    frames_analyzed = models.PositiveIntegerField(default=0)
+    duration_seconds = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    error_message = models.TextField(blank=True)
+    analysis_report = models.JSONField(default=dict, blank=True)
 
     def __str__(self):
         return f"{self.original_filename} ({self.exam_session})"
+
+
+class ExamVideoAnalysisResult(TimestampedModel):
+    exam_video = models.OneToOneField(ExamVideo, on_delete=models.CASCADE, related_name="result")
+    model_name = models.CharField(max_length=80)
+    report_uri = models.CharField(max_length=300, blank=True)
+    session_uri = models.CharField(max_length=300, blank=True)
+    annotated_video_uri = models.CharField(max_length=300, blank=True)
+    latest_preview_uri = models.CharField(max_length=300, blank=True)
+    frames_analyzed = models.PositiveIntegerField(default=0)
+    current_frame = models.PositiveIntegerField(default=0)
+    total_frames = models.PositiveIntegerField(default=0)
+    progress_percent = models.PositiveIntegerField(default=0)
+    duration_seconds = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total_alerts = models.PositiveIntegerField(default=0)
+    alert_counts = models.JSONField(default=dict, blank=True)
+    latest_status = models.CharField(max_length=180, blank=True)
+    report_payload = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"Analysis result for {self.exam_video.original_filename}"
 
 
 class ExamAttempt(TimestampedModel):
@@ -270,6 +300,7 @@ class AlertEvent(TimestampedModel):
     ]
 
     exam_session = models.ForeignKey(ExamSession, on_delete=models.CASCADE, related_name="alerts")
+    exam_video = models.ForeignKey(ExamVideo, null=True, blank=True, on_delete=models.CASCADE, related_name="alerts")
     camera = models.ForeignKey(Camera, on_delete=models.PROTECT)
     seat = models.ForeignKey(Seat, null=True, blank=True, on_delete=models.SET_NULL)
     alert_type = models.CharField(max_length=32, choices=TYPE_CHOICES)
@@ -280,6 +311,7 @@ class AlertEvent(TimestampedModel):
     visibility_quality = models.CharField(max_length=80, default="clear")
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_VISIBLE)
     summary = models.CharField(max_length=240)
+    metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ("-occurred_at",)
@@ -295,7 +327,7 @@ class EvidenceAsset(TimestampedModel):
 
     alert = models.ForeignKey(AlertEvent, on_delete=models.CASCADE, related_name="evidence_assets")
     kind = models.CharField(max_length=24, choices=KIND_CHOICES)
-    uri = models.CharField(max_length=240)
+    uri = models.CharField(max_length=300)
     captured_at = models.DateTimeField(default=timezone.now)
     quality_note = models.CharField(max_length=180, blank=True)
 
