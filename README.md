@@ -160,6 +160,28 @@ Demo users all use password `sightline`:
 - `invigilator`
 - `student`
 
+## Production CI/CD
+
+The production flow mirrors the reference deployment pattern:
+
+- `.github/workflows/ci.yml` runs Django checks/tests, web lint/build, and Docker image builds.
+- `.github/workflows/deploy-production.yml` reuses CI, builds and pushes API/web images to GHCR, then deploys them over SSH with Docker Compose.
+- `compose.prod.yml` is the production compose shape for server use or local validation.
+- `.env.production.example` lists the GitHub Actions secrets needed by the deploy workflow.
+
+Required server dependencies:
+
+- Docker
+- Docker Compose v2, or legacy `docker-compose`
+
+Configure the secrets from `.env.production.example` in GitHub, then push to `main` or run `Deploy Production` manually from GitHub Actions. The deploy job creates `/opt/sightline`, writes `.env`, `docker-compose.yml`, and nginx config there, pulls the latest GHCR images, starts the stack, waits for nginx health, and prunes old Docker resources.
+
+To validate the production compose file locally, provide the required image/database variables and run:
+
+```bash
+pnpm run docker:prod:config
+```
+
 ## Current Implementation Notes
 
 The codebase still contains some prototype tables and endpoints from an earlier larger platform. Treat the docs in `docs/product` as the source of truth for the current MVP.

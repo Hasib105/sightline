@@ -1,0 +1,144 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: sightline-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sightline}
+      POSTGRES_USER: ${POSTGRES_USER:-sightline}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - sightline-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sightline} -d ${POSTGRES_DB:-sightline}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - sightline
+
+  redis:
+    image: redis:7-alpine
+    container_name: sightline-redis
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes:
+      - sightline-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - sightline
+
+  api:
+    image: ${GHCR_API_IMAGE}
+    container_name: sightline-api
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-sightline}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-sightline}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      SIGHTLINE_DEBUG: "0"
+      SIGHTLINE_COLLECTSTATIC: "1"
+    volumes:
+      - sightline-static:/app/apps/api-django/staticfiles
+      - sightline-media:/app/apps/api-django/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - sightline
+
+  worker:
+    image: ${GHCR_API_IMAGE}
+    container_name: sightline-worker
+    command: celery -A sightline_api worker -l info
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-sightline}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-sightline}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      SIGHTLINE_DEBUG: "0"
+      SIGHTLINE_SKIP_MIGRATIONS: "1"
+      SIGHTLINE_COLLECTSTATIC: "0"
+      SIGHTLINE_ANALYSIS_THREAD_FALLBACK: "0"
+      EXAM_AI_ANALYSIS_FPS: ${EXAM_AI_ANALYSIS_FPS:-2.0}
+      EXAM_AI_MODEL_SIZE: ${EXAM_AI_MODEL_SIZE:-n}
+    volumes:
+      - sightline-media:/app/apps/api-django/media
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - sightline
+
+  web:
+    image: ${GHCR_WEB_IMAGE}
+    container_name: sightline-web
+    env_file:
+      - .env
+    environment:
+      API_INTERNAL_BASE_URL: http://api:8000
+      NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_URL}
+      NEXT_PUBLIC_AUTH_BASE_URL: ${PUBLIC_URL}
+      NEXT_PUBLIC_WEB_BASE_URL: ${PUBLIC_URL}
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/status').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - sightline
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: sightline-nginx
+    ports:
+      - "${APP_PORT:-80}:80"
+    volumes:
+      - ./infra/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - sightline-static:/var/www/sightline/static:ro
+      - sightline-media:/var/www/sightline/media:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/nginx-health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+    networks:
+      - sightline
+
+volumes:
+  sightline-postgres:
+  sightline-redis:
+  sightline-static:
+  sightline-media:
+
+networks:
+  sightline:
+    driver: bridge

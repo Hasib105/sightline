@@ -1,5 +1,6 @@
 .git
 .github
+.reference
 **/.next
 **/node_modules
 **/__pycache__
@@ -12,6 +13,7 @@
 !.env.example
 db.sqlite3
 *.sqlite3
+/*.pt
 staticfiles
 coverage
 dist

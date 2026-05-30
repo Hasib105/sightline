@@ -24,7 +24,10 @@
     "install:all": "pnpm install && pnpm run api:install",
     "docker:up": "docker compose up --build",
     "docker:down": "docker compose down",
-    "docker:seed": "docker compose exec api python manage.py seed_sightline"
+    "docker:seed": "docker compose exec api python manage.py seed_sightline",
+    "docker:prod:config": "docker compose -f compose.prod.yml config",
+    "docker:prod:up": "docker compose -f compose.prod.yml up -d",
+    "docker:prod:down": "docker compose -f compose.prod.yml down"
   },
   "devDependencies": {
     "concurrently": "^8.0.0",

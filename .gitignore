@@ -24,6 +24,7 @@ venv/
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 # Local databases and runtime files
 db.sqlite3
@@ -36,3 +37,4 @@ apps/api-django/media/
 Thumbs.db
 .idea/
 .vscode/
+.reference/
