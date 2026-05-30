@@ -23,8 +23,10 @@ import type {
   AtRiskRunResponse,
   CourseCreatePayload,
   CourseEnrollment,
+  CourseChatThread,
   CourseMaterial,
   CourseSummary,
+  CourseUnit,
   CreditLedgerEntry,
   CurrentUser,
   ExamCreatePayload,
@@ -621,10 +623,14 @@ export async function createCourse(payload: CourseCreatePayload): Promise<Course
 
 export type CourseMaterialPayload = {
   kind: CourseMaterial["kind"];
+  unit?: number | null;
   title: string;
   description?: string;
-  uri: string;
+  content_text?: string;
+  uri?: string;
   original_filename?: string;
+  order?: number;
+  file?: File;
 };
 
 export async function listCourseMaterials(courseId: number): Promise<CourseMaterial[]> {
@@ -636,12 +642,90 @@ export async function createCourseMaterial(
   courseId: number,
   payload: CourseMaterialPayload
 ): Promise<CourseMaterial> {
+  if (payload.file) {
+    const formData = new FormData();
+    formData.append("file", payload.file);
+    formData.append("kind", payload.kind);
+    formData.append("title", payload.title);
+    if (payload.unit) formData.append("unit", String(payload.unit));
+    if (payload.description) formData.append("description", payload.description);
+    if (payload.content_text) formData.append("content_text", payload.content_text);
+    if (payload.uri) formData.append("uri", payload.uri);
+    if (payload.order) formData.append("order", String(payload.order));
+    const response = await apiFetchClient(`/api/v1/courses/${courseId}/materials`, {
+      method: "POST",
+      body: formData,
+    });
+    return parseResponse<CourseMaterial>(response);
+  }
   const response = await apiFetchClient(`/api/v1/courses/${courseId}/materials`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   return parseResponse<CourseMaterial>(response);
+}
+
+export async function listCourseUnits(courseId: number): Promise<CourseUnit[]> {
+  const response = await apiFetchClient(`/api/v1/courses/${courseId}/units`);
+  return parseResponse<CourseUnit[]>(response);
+}
+
+export async function createCourseUnit(
+  courseId: number,
+  payload: { title: string; summary?: string; order: number }
+): Promise<CourseUnit> {
+  const response = await apiFetchClient(`/api/v1/courses/${courseId}/units`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<CourseUnit>(response);
+}
+
+export async function deleteCourseUnit(unitId: number): Promise<{ deleted: boolean; record_id: number }> {
+  const response = await apiFetchClient(`/api/v1/course-units/${unitId}`, {
+    method: "DELETE",
+  });
+  return parseResponse<{ deleted: boolean; record_id: number }>(response);
+}
+
+export async function indexCourseContent(courseId: number): Promise<{ course: number; indexed_chunks: number }> {
+  const response = await apiFetchClient(`/api/v1/courses/${courseId}/index`, {
+    method: "POST",
+  });
+  return parseResponse<{ course: number; indexed_chunks: number }>(response);
+}
+
+export async function listCourseChatThreads(courseId?: number): Promise<CourseChatThread[]> {
+  const query = courseId ? `?course=${courseId}` : "";
+  const response = await apiFetchClient(`/api/v1/course-chat-threads${query}`);
+  return parseResponse<CourseChatThread[]>(response);
+}
+
+export async function createCourseChatThread(payload: {
+  course: number;
+  unit?: number | null;
+  title: string;
+}): Promise<CourseChatThread> {
+  const response = await apiFetchClient("/api/v1/course-chat-threads", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<CourseChatThread>(response);
+}
+
+export async function sendCourseChatMessage(
+  threadId: number,
+  message: string
+): Promise<CourseChatThread> {
+  const response = await apiFetchClient(`/api/v1/course-chat-threads/${threadId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+  return parseResponse<CourseChatThread>(response);
 }
 
 export async function listEnrollments(): Promise<CourseEnrollment[]> {

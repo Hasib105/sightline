@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from uuid import uuid4
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -24,8 +25,10 @@ from .models import (
     AttendanceRecord,
     Camera,
     Course,
+    CourseChatThread,
     CourseEnrollment,
     CourseMaterial,
+    CourseUnit,
     Department,
     EvidenceAsset,
     ExamAttempt,
@@ -39,6 +42,7 @@ from .models import (
     StudentRiskScore,
     UserProfile,
 )
+from .course_rag import answer_course_question, index_course, index_material
 from .services import agenda_for_student, calculate_risk_run, generate_due_notifications
 
 
@@ -107,6 +111,30 @@ def user_role(request):
 
 def has_role(request, *roles):
     return is_admin_request(request) or user_role(request) in roles
+
+
+def can_view_course(request, course):
+    if is_admin_request(request):
+        return True
+    role = user_role(request)
+    if role == UserProfile.ROLE_TEACHER:
+        return course.teacher_id == django_user(request).id
+    if role == UserProfile.ROLE_STUDENT:
+        student = serializers.student_for_user(django_user(request))
+        if not student:
+            return False
+        return CourseEnrollment.objects.filter(
+            course=course,
+            student=student,
+            status=CourseEnrollment.STATUS_ACTIVE,
+        ).exists()
+    return False
+
+
+def can_manage_course(request, course):
+    return is_admin_request(request) or (
+        user_role(request) == UserProfile.ROLE_TEACHER and course.teacher_id == django_user(request).id
+    )
 
 
 class SessionlessAPIView(APIView):
@@ -272,6 +300,76 @@ class ApiV1DispatchView(SessionlessAPIView):
                 course = serializer.save()
                 return Response(serializers.CourseSerializer(course).data, status=status.HTTP_201_CREATED)
 
+        if clean_path.startswith("courses/") and clean_path.endswith("/units"):
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            course_id = clean_path.split("/")[1]
+            course = Course.objects.filter(id=course_id).first()
+            if not course:
+                return Response({"detail": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
+            if request.method == "GET":
+                if not can_view_course(request, course):
+                    return Response({"detail": "Not authorized to view course units."}, status=status.HTTP_403_FORBIDDEN)
+                queryset = CourseUnit.objects.filter(course=course).prefetch_related("materials")
+                return Response(serializers.CourseUnitSerializer(queryset, many=True).data)
+            if request.method == "POST":
+                if not can_manage_course(request, course):
+                    return Response({"detail": "Only the course teacher or admin can create units."}, status=status.HTTP_403_FORBIDDEN)
+                serializer = serializers.CourseUnitSerializer(
+                    data=request.data,
+                    context={"request": request, "course": course},
+                )
+                serializer.is_valid(raise_exception=True)
+                unit = serializer.save()
+                return Response(serializers.CourseUnitSerializer(unit).data, status=status.HTTP_201_CREATED)
+
+        if clean_path.startswith("course-units/"):
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            parts = clean_path.split("/")
+            if len(parts) < 2 or not parts[1].isdigit():
+                return Response({"detail": "Invalid unit route."}, status=status.HTTP_404_NOT_FOUND)
+            unit = CourseUnit.objects.select_related("course").filter(id=parts[1]).first()
+            if not unit:
+                return Response({"detail": "Unit not found."}, status=status.HTTP_404_NOT_FOUND)
+            if len(parts) == 2 and request.method == "GET":
+                if not can_view_course(request, unit.course):
+                    return Response({"detail": "Not authorized to view this unit."}, status=status.HTTP_403_FORBIDDEN)
+                return Response(serializers.CourseUnitSerializer(unit).data)
+            if len(parts) == 2 and request.method in {"PATCH", "PUT"}:
+                if not can_manage_course(request, unit.course):
+                    return Response({"detail": "Only the course teacher or admin can edit units."}, status=status.HTTP_403_FORBIDDEN)
+                serializer = serializers.CourseUnitSerializer(unit, data=request.data, partial=True)
+                serializer.is_valid(raise_exception=True)
+                unit = serializer.save()
+                return Response(serializers.CourseUnitSerializer(unit).data)
+            if len(parts) == 2 and request.method == "DELETE":
+                if not can_manage_course(request, unit.course):
+                    return Response({"detail": "Only the course teacher or admin can delete units."}, status=status.HTTP_403_FORBIDDEN)
+                record_id = unit.id
+                unit.delete()
+                return Response({"deleted": True, "record_id": record_id})
+            if len(parts) == 3 and parts[2] == "materials" and request.method == "GET":
+                if not can_view_course(request, unit.course):
+                    return Response({"detail": "Not authorized to view unit materials."}, status=status.HTTP_403_FORBIDDEN)
+                queryset = CourseMaterial.objects.filter(unit=unit).select_related("uploaded_by", "course", "unit")
+                return Response(serializers.CourseMaterialSerializer(queryset, many=True).data)
+
+        if clean_path.startswith("courses/") and clean_path.endswith("/index") and request.method == "POST":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            course_id = clean_path.split("/")[1]
+            course = Course.objects.filter(id=course_id).first()
+            if not course:
+                return Response({"detail": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
+            if not can_manage_course(request, course):
+                return Response({"detail": "Only the course teacher or admin can index course content."}, status=status.HTTP_403_FORBIDDEN)
+            chunks = index_course(course)
+            return Response({"course": course.id, "indexed_chunks": chunks})
+
         if clean_path.startswith("courses/") and clean_path.endswith("/materials"):
             auth_error = self.auth_required(request)
             if auth_error:
@@ -281,32 +379,13 @@ class ApiV1DispatchView(SessionlessAPIView):
             if not course:
                 return Response({"detail": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
 
-            def can_view_materials():
-                if is_admin_request(request):
-                    return True
-                role = user_role(request)
-                if role == UserProfile.ROLE_TEACHER:
-                    return course.teacher_id == django_user(request).id
-                if role == UserProfile.ROLE_STUDENT:
-                    student = serializers.student_for_user(django_user(request))
-                    if not student:
-                        return False
-                    return CourseEnrollment.objects.filter(
-                        course=course,
-                        student=student,
-                        status=CourseEnrollment.STATUS_ACTIVE,
-                    ).exists()
-                return False
-
             if request.method == "GET":
-                if not can_view_materials():
+                if not can_view_course(request, course):
                     return Response({"detail": "Not authorized to view course materials."}, status=status.HTTP_403_FORBIDDEN)
-                queryset = CourseMaterial.objects.filter(course=course).select_related("uploaded_by", "course")
+                queryset = CourseMaterial.objects.filter(course=course).select_related("uploaded_by", "course", "unit")
                 return Response(serializers.CourseMaterialSerializer(queryset, many=True).data)
             if request.method == "POST":
-                if not has_role(request, UserProfile.ROLE_TEACHER):
-                    return Response({"detail": "Only teachers or admins can upload course materials."}, status=status.HTTP_403_FORBIDDEN)
-                if not is_admin_request(request) and course.teacher_id != django_user(request).id:
+                if not can_manage_course(request, course):
                     return Response({"detail": "Teachers can upload materials only for their own courses."}, status=status.HTTP_403_FORBIDDEN)
                 serializer = serializers.CourseMaterialSerializer(
                     data=request.data,
@@ -314,7 +393,101 @@ class ApiV1DispatchView(SessionlessAPIView):
                 )
                 serializer.is_valid(raise_exception=True)
                 material = serializer.save()
+                index_material(material)
                 return Response(serializers.CourseMaterialSerializer(material).data, status=status.HTTP_201_CREATED)
+
+        if clean_path.startswith("course-materials/"):
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            material_id = clean_path.split("/")[1]
+            material = CourseMaterial.objects.select_related("course", "unit").filter(id=material_id).first()
+            if not material:
+                return Response({"detail": "Material not found."}, status=status.HTTP_404_NOT_FOUND)
+            if request.method == "PATCH":
+                if not can_manage_course(request, material.course):
+                    return Response({"detail": "Only the course teacher or admin can edit materials."}, status=status.HTTP_403_FORBIDDEN)
+                serializer = serializers.CourseMaterialSerializer(
+                    material,
+                    data=request.data,
+                    partial=True,
+                    context={"request": request, "course": material.course},
+                )
+                serializer.is_valid(raise_exception=True)
+                material = serializer.save()
+                index_material(material)
+                return Response(serializers.CourseMaterialSerializer(material).data)
+            if request.method == "DELETE":
+                if not can_manage_course(request, material.course):
+                    return Response({"detail": "Only the course teacher or admin can delete materials."}, status=status.HTTP_403_FORBIDDEN)
+                record_id = material.id
+                material.delete()
+                return Response({"deleted": True, "record_id": record_id})
+
+        if clean_path == "course-chat-threads":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if request.method == "GET":
+                queryset = CourseChatThread.objects.select_related("course", "unit", "user").prefetch_related("messages")
+                if not is_admin_request(request):
+                    queryset = queryset.filter(user=django_user(request))
+                course_id = request.GET.get("course")
+                if course_id:
+                    queryset = queryset.filter(course_id=course_id)
+                return Response(serializers.CourseChatThreadSerializer(queryset, many=True).data)
+            if request.method == "POST":
+                course = Course.objects.filter(id=request.data.get("course")).first()
+                if not course:
+                    return Response({"detail": "Course not found."}, status=status.HTTP_400_BAD_REQUEST)
+                if not can_view_course(request, course):
+                    return Response({"detail": "Not authorized to chat about this course."}, status=status.HTTP_403_FORBIDDEN)
+                unit = None
+                unit_id = request.data.get("unit")
+                if unit_id:
+                    unit = CourseUnit.objects.filter(id=unit_id, course=course).first()
+                    if not unit:
+                        return Response({"detail": "Unit not found for this course."}, status=status.HTTP_400_BAD_REQUEST)
+                thread = CourseChatThread.objects.create(
+                    course=course,
+                    unit=unit,
+                    user=django_user(request),
+                    title=(request.data.get("title") or f"{course.code} chat").strip()[:180],
+                    checkpoint_thread_id=f"course-{course.id}-{uuid4().hex}",
+                )
+                return Response(serializers.CourseChatThreadSerializer(thread).data, status=status.HTTP_201_CREATED)
+
+        if clean_path.startswith("course-chat-threads/"):
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            parts = clean_path.split("/")
+            if len(parts) < 2 or not parts[1].isdigit():
+                return Response({"detail": "Invalid chat thread route."}, status=status.HTTP_404_NOT_FOUND)
+            thread = (
+                CourseChatThread.objects.select_related("course", "unit", "user")
+                .prefetch_related("messages")
+                .filter(id=parts[1])
+                .first()
+            )
+            if not thread:
+                return Response({"detail": "Chat thread not found."}, status=status.HTTP_404_NOT_FOUND)
+            if not is_admin_request(request) and thread.user_id != django_user(request).id:
+                return Response({"detail": "Not authorized to access this chat thread."}, status=status.HTTP_403_FORBIDDEN)
+            if len(parts) == 2 and request.method == "GET":
+                return Response(serializers.CourseChatThreadSerializer(thread).data)
+            if len(parts) == 3 and parts[2] == "messages" and request.method == "POST":
+                question = (request.data.get("message") or request.data.get("content") or "").strip()
+                if not question:
+                    return Response({"detail": "Message is required."}, status=status.HTTP_400_BAD_REQUEST)
+                answer_course_question(thread, question)
+                thread.save(update_fields=["updated_at"])
+                thread = (
+                    CourseChatThread.objects.select_related("course", "unit", "user")
+                    .prefetch_related("messages")
+                    .get(id=thread.id)
+                )
+                return Response(serializers.CourseChatThreadSerializer(thread).data, status=status.HTTP_201_CREATED)
 
         if clean_path == "enrollments" and request.method == "GET":
             auth_error = self.auth_required(request)

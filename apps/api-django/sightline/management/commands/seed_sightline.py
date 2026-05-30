@@ -13,6 +13,8 @@ from sightline.models import (
     ClassSchedule,
     Course,
     CourseEnrollment,
+    CourseMaterial,
+    CourseUnit,
     Department,
     EvidenceAsset,
     ExamSchedule,
@@ -127,6 +129,38 @@ class Command(BaseCommand):
         for course, teacher in course_teacher_pairs:
             course.teacher = teacher
             course.save(update_fields=["teacher", "updated_at"])
+
+        for course, unit_rows in {
+            algorithms: [
+                ("Algorithm foundations", "Growth rates, correctness, and the shape of efficient problem solving."),
+                ("Graph traversal", "Breadth-first and depth-first search with practical traversal examples."),
+                ("Dynamic programming", "Breaking overlapping subproblems into reusable state transitions."),
+            ],
+            databases: [
+                ("Relational model", "Tables, keys, relationships, and normalization basics."),
+                ("SQL querying", "Filtering, grouping, joining, and query performance."),
+            ],
+        }.items():
+            for order, (title, summary) in enumerate(unit_rows, start=1):
+                unit, _ = CourseUnit.objects.update_or_create(
+                    course=course,
+                    order=order,
+                    defaults={"title": title, "summary": summary},
+                )
+                CourseMaterial.objects.update_or_create(
+                    course=course,
+                    unit=unit,
+                    title=f"{title} notes",
+                    defaults={
+                        "uploaded_by": course.teacher,
+                        "kind": CourseMaterial.KIND_TEXT,
+                        "description": "Seeded unit notes for course chat and student review.",
+                        "content_text": summary
+                        + " Students should connect definitions to examples and be ready to explain the main idea in short answers.",
+                        "uri": "",
+                        "order": 1,
+                    },
+                )
 
         hall_a, _ = Hall.objects.get_or_create(name="Hall A", defaults={"building": "Academic Block", "capacity": 96})
         hall_b, _ = Hall.objects.get_or_create(name="Hall B", defaults={"building": "Engineering Annex", "capacity": 64})

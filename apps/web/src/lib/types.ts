@@ -612,13 +612,52 @@ export interface CourseMaterial {
   course: number;
   course_code: string;
   course_title: string;
+  unit: number | null;
+  unit_title: string | null;
+  unit_order: number | null;
   uploaded_by: number | null;
   uploaded_by_username: string | null;
-  kind: "video" | "slide" | "url";
+  kind: "text" | "video" | "slide" | "pdf" | "doc" | "embed" | "url";
   title: string;
   description: string;
+  content_text: string;
   uri: string;
   original_filename: string;
+  order: number;
+  indexed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CourseUnit {
+  id: number;
+  course: number;
+  course_code: string;
+  title: string;
+  summary: string;
+  order: number;
+  material_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CourseChatMessage {
+  id: number;
+  role: "user" | "assistant" | "system";
+  content: string;
+  citations: Array<Record<string, JsonValue>>;
+  created_at: string;
+}
+
+export interface CourseChatThread {
+  id: number;
+  course: number;
+  course_code: string;
+  unit: number | null;
+  unit_title: string | null;
+  title: string;
+  checkpoint_thread_id: string;
+  messages: CourseChatMessage[];
   created_at: string;
   updated_at: string;
 }

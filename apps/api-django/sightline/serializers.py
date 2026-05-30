@@ -13,8 +13,11 @@ from .models import (
     AssessmentRecord,
     AttendanceRecord,
     Course,
+    CourseChatMessage,
+    CourseChatThread,
     CourseEnrollment,
     CourseMaterial,
+    CourseUnit,
     Department,
     ExamAttempt,
     ExamSession,
@@ -308,10 +311,40 @@ class CourseSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
+class CourseUnitSerializer(serializers.ModelSerializer):
+    course_code = serializers.CharField(source="course.code", read_only=True)
+    material_count = serializers.IntegerField(source="materials.count", read_only=True)
+
+    class Meta:
+        model = CourseUnit
+        fields = [
+            "id",
+            "course",
+            "course_code",
+            "title",
+            "summary",
+            "order",
+            "material_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["course", "created_at", "updated_at"]
+
+    def create(self, validated_data):
+        course = self.context.get("course")
+        if course:
+            validated_data["course"] = course
+        return super().create(validated_data)
+
+
 class CourseMaterialSerializer(serializers.ModelSerializer):
     course_code = serializers.CharField(source="course.code", read_only=True)
     course_title = serializers.CharField(source="course.title", read_only=True)
+    unit_title = serializers.CharField(source="unit.title", read_only=True)
+    unit_order = serializers.IntegerField(source="unit.order", read_only=True)
     uploaded_by_username = serializers.CharField(source="uploaded_by.username", read_only=True)
+    file = serializers.FileField(write_only=True, required=False)
+    uri = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = CourseMaterial
@@ -320,25 +353,77 @@ class CourseMaterialSerializer(serializers.ModelSerializer):
             "course",
             "course_code",
             "course_title",
+            "unit",
+            "unit_title",
+            "unit_order",
             "uploaded_by",
             "uploaded_by_username",
             "kind",
             "title",
             "description",
+            "content_text",
             "uri",
+            "file",
             "original_filename",
+            "order",
+            "indexed_at",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["course", "uploaded_by", "created_at", "updated_at"]
+        read_only_fields = ["course", "uploaded_by", "indexed_at", "created_at", "updated_at"]
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        course = self.context.get("course") or getattr(self.instance, "course", None)
+        unit = attrs.get("unit")
+        if unit and course and unit.course_id != course.id:
+            raise serializers.ValidationError("Unit must belong to the selected course.")
+        if self.instance is None and not attrs.get("uri") and not attrs.get("file") and not attrs.get("content_text"):
+            raise serializers.ValidationError("Provide text, a URI, or an uploaded file.")
+        return attrs
 
     def create(self, validated_data):
         request = self.context["request"]
+        upload = validated_data.pop("file", None)
         course = self.context.get("course")
         if course:
             validated_data["course"] = course
         validated_data["uploaded_by"] = request_user(request)
+        if upload is not None:
+            original_filename = get_valid_filename(Path(upload.name).name or "course-material")
+            extension = Path(original_filename).suffix.lower()
+            storage_name = f"course_materials/{uuid4().hex}{extension}"
+            validated_data["uri"] = default_storage.save(storage_name, upload)
+            validated_data.setdefault("original_filename", original_filename)
         return super().create(validated_data)
+
+
+class CourseChatMessageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CourseChatMessage
+        fields = ["id", "role", "content", "citations", "created_at"]
+
+
+class CourseChatThreadSerializer(serializers.ModelSerializer):
+    course_code = serializers.CharField(source="course.code", read_only=True)
+    unit_title = serializers.CharField(source="unit.title", read_only=True)
+    messages = CourseChatMessageSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = CourseChatThread
+        fields = [
+            "id",
+            "course",
+            "course_code",
+            "unit",
+            "unit_title",
+            "title",
+            "checkpoint_thread_id",
+            "messages",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["checkpoint_thread_id", "created_at", "updated_at"]
 
 
 class CourseEnrollmentSerializer(serializers.ModelSerializer):

@@ -8,7 +8,9 @@ from django.utils import timezone
 from .exam_detection.config import CFG
 from .models import (
     Course,
+    CourseChatMessage,
     CourseMaterial,
+    CourseUnit,
     ExamAttempt,
     ExamSession,
     ExamVideo,
@@ -98,6 +100,7 @@ class SightlineApiSmokeTests(TestCase):
     def test_teacher_can_upload_course_material(self):
         self.assertTrue(self.client.login(username="teacher", password="sightline"))
         course = Course.objects.get(code="CSE-321")
+        existing_materials = CourseMaterial.objects.filter(course=course).count()
 
         response = self.client.post(
             f"/api/v1/courses/{course.id}/materials",
@@ -112,7 +115,61 @@ class SightlineApiSmokeTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(CourseMaterial.objects.filter(course=course).count(), 1)
+        self.assertEqual(CourseMaterial.objects.filter(course=course).count(), existing_materials + 1)
+
+    def test_teacher_can_create_unit_and_student_can_chat_about_it(self):
+        self.assertTrue(self.client.login(username="teacher", password="sightline"))
+        course = Course.objects.get(code="CSE-321")
+        next_order = CourseUnit.objects.filter(course=course).count() + 1
+
+        unit_response = self.client.post(
+            f"/api/v1/courses/{course.id}/units",
+            data={"title": "Greedy methods", "summary": "Choosing locally optimal steps.", "order": next_order},
+            content_type="application/json",
+        )
+        self.assertEqual(unit_response.status_code, 201)
+        unit_id = unit_response.json()["id"]
+
+        material_response = self.client.post(
+            f"/api/v1/courses/{course.id}/materials",
+            data={
+                "unit": unit_id,
+                "kind": "text",
+                "title": "Greedy notes",
+                "content_text": "Greedy algorithms choose the best local option and need an exchange argument for correctness.",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(material_response.status_code, 201)
+        self.client.logout()
+
+        self.assertTrue(self.client.login(username="student", password="sightline"))
+        thread_response = self.client.post(
+            "/api/v1/course-chat-threads",
+            data={"course": course.id, "unit": unit_id, "title": "Greedy help"},
+            content_type="application/json",
+        )
+        self.assertEqual(thread_response.status_code, 201)
+        message_response = self.client.post(
+            f"/api/v1/course-chat-threads/{thread_response.json()['id']}/messages",
+            data={"message": "What makes greedy algorithms correct?"},
+            content_type="application/json",
+        )
+        self.assertEqual(message_response.status_code, 201)
+        self.assertEqual(CourseChatMessage.objects.filter(thread_id=thread_response.json()["id"]).count(), 2)
+
+    def test_teacher_can_delete_unit_with_attached_content(self):
+        self.assertTrue(self.client.login(username="teacher", password="sightline"))
+        course = Course.objects.get(code="CSE-321")
+        unit = CourseUnit.objects.filter(course=course).first()
+        self.assertIsNotNone(unit)
+        self.assertTrue(CourseMaterial.objects.filter(unit=unit).exists())
+
+        response = self.client.delete(f"/api/v1/course-units/{unit.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(CourseUnit.objects.filter(id=unit.id).exists())
+        self.assertFalse(CourseMaterial.objects.filter(unit_id=unit.id).exists())
 
     def test_teacher_can_create_own_course_and_exam(self):
         self.assertTrue(self.client.login(username="teacher", password="sightline"))

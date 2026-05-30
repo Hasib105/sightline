@@ -42,29 +42,91 @@ class Course(TimestampedModel):
         return f"{self.code} - {self.title}"
 
 
+class CourseUnit(TimestampedModel):
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="units")
+    title = models.CharField(max_length=180)
+    summary = models.TextField(blank=True)
+    order = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        ordering = ("course__code", "order", "id")
+        unique_together = ("course", "order")
+
+    def __str__(self):
+        return f"{self.course.code} / Unit {self.order}: {self.title}"
+
+
 class CourseMaterial(TimestampedModel):
+    KIND_TEXT = "text"
     KIND_VIDEO = "video"
     KIND_SLIDE = "slide"
+    KIND_PDF = "pdf"
+    KIND_DOC = "doc"
+    KIND_EMBED = "embed"
     KIND_URL = "url"
     KIND_CHOICES = [
+        (KIND_TEXT, "Text"),
         (KIND_VIDEO, "Video"),
         (KIND_SLIDE, "Slide"),
+        (KIND_PDF, "PDF"),
+        (KIND_DOC, "Document"),
+        (KIND_EMBED, "Embed"),
         (KIND_URL, "URL"),
     ]
 
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="materials")
+    unit = models.ForeignKey(CourseUnit, null=True, blank=True, on_delete=models.CASCADE, related_name="materials")
     uploaded_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
     kind = models.CharField(max_length=24, choices=KIND_CHOICES)
     title = models.CharField(max_length=180)
     description = models.TextField(blank=True)
+    content_text = models.TextField(blank=True)
     uri = models.CharField(max_length=300)
     original_filename = models.CharField(max_length=180, blank=True)
+    order = models.PositiveIntegerField(default=1)
+    indexed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        ordering = ("-created_at",)
+        ordering = ("unit__order", "order", "-created_at")
 
     def __str__(self):
         return f"{self.course.code} - {self.title}"
+
+
+class CourseChatThread(TimestampedModel):
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="chat_threads")
+    unit = models.ForeignKey(CourseUnit, null=True, blank=True, on_delete=models.SET_NULL, related_name="chat_threads")
+    user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="course_chat_threads")
+    title = models.CharField(max_length=180)
+    checkpoint_thread_id = models.CharField(max_length=120, unique=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+
+    def __str__(self):
+        return f"{self.title} ({self.course.code})"
+
+
+class CourseChatMessage(TimestampedModel):
+    ROLE_USER = "user"
+    ROLE_ASSISTANT = "assistant"
+    ROLE_SYSTEM = "system"
+    ROLE_CHOICES = [
+        (ROLE_USER, "User"),
+        (ROLE_ASSISTANT, "Assistant"),
+        (ROLE_SYSTEM, "System"),
+    ]
+
+    thread = models.ForeignKey(CourseChatThread, on_delete=models.CASCADE, related_name="messages")
+    role = models.CharField(max_length=16, choices=ROLE_CHOICES)
+    content = models.TextField()
+    citations = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        ordering = ("created_at", "id")
+
+    def __str__(self):
+        return f"{self.role} message in {self.thread_id}"
 
 
 class UserProfile(TimestampedModel):
