@@ -90,6 +90,7 @@ const routeLabels: Record<string, string> = {
   "/dashboard/teacher/exams": "Teacher Exams",
   "/dashboard/teacher/materials": "Course materials",
   "/dashboard/teacher/risk": "At-risk Students",
+  "/dashboard/invigilator": "Invigilator Review",
   "/dashboard/playground": "Playground",
   "/dashboard/api-keys": "API Keys",
   "/dashboard/docs": "Docs",
@@ -106,6 +107,8 @@ const routeLabels: Record<string, string> = {
   "/admin": "Overview",
   "/admin/analytics": "Analytics",
   "/admin/users": "Users",
+  "/admin/teachers": "Teachers",
+  "/admin/invigilators": "Invigilators",
   "/admin/plans": "Plans & Credits",
   "/admin/provider-routing": "Provider Routing",
   "/admin/provider-credentials": "Provider Credentials",
@@ -156,11 +159,16 @@ function navigationFor(kind: ShellKind, user: CurrentUser): ShellSection[] {
         items: [{ href: "/admin", icon: LayoutDashboard, label: "Overview", match: "exact" }],
       },
       {
-        label: "MVP",
+        label: "Users",
         items: [
-          { href: "/admin/users", icon: Users, label: "Users" },
-          { href: "/dashboard", icon: ArrowUpRight, label: "Dashboard" },
+          { href: "/admin/users", icon: Users, label: "All Users" },
+          { href: "/admin/teachers", icon: BookOpenCheck, label: "Teachers" },
+          { href: "/admin/invigilators", icon: ShieldCheck, label: "Invigilators" },
         ],
+      },
+      {
+        label: "MVP",
+        items: [{ href: "/dashboard", icon: ArrowUpRight, label: "Dashboard" }],
       },
     ];
   }
@@ -185,6 +193,13 @@ function navigationFor(kind: ShellKind, user: CurrentUser): ShellSection[] {
         { href: "/dashboard/courses", icon: BookOpenCheck, label: "Enroll Courses" },
         { href: "/dashboard/exams", icon: ClipboardList, label: "Give Exams" },
       ],
+    });
+  }
+
+  if (user.role === "invigilator" || user.role === "admin" || user.is_superuser) {
+    sections.push({
+      label: "Invigilator",
+      items: [{ href: "/dashboard/invigilator", icon: ShieldCheck, label: "Alert Review" }],
     });
   }
 

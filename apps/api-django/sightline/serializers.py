@@ -1,5 +1,10 @@
+from pathlib import Path
+from uuid import uuid4
+
 from django.contrib.auth import authenticate, get_user
 from django.contrib.auth.models import User
+from django.core.files.storage import default_storage
+from django.utils.text import get_valid_filename
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -14,6 +19,7 @@ from .models import (
     ExamAttempt,
     ExamSession,
     ExamVideo,
+    ExamVideoAnalysisResult,
     Hall,
     Semester,
     StudentProfile,
@@ -243,6 +249,31 @@ def default_hall():
     )
 
 
+def default_upload_exam_session():
+    semester = default_semester()
+    course, _ = Course.objects.get_or_create(
+        semester=semester,
+        code="VIDEO-UPLOAD",
+        defaults={
+            "department": default_department(),
+            "title": "Uploaded Video Review",
+        },
+    )
+    session = ExamSession.objects.filter(course=course, quiz_title="Uploaded Video Review").order_by("id").first()
+    if session:
+        return session
+    starts_at = timezone.now()
+    return ExamSession.objects.create(
+        course=course,
+        hall=default_hall(),
+        starts_at=starts_at,
+        ends_at=starts_at + timezone.timedelta(hours=2),
+        status=ExamSession.STATUS_PREPARED,
+        quiz_title="Uploaded Video Review",
+        quiz_instructions="Automatically assigned context for invigilator uploaded videos.",
+    )
+
+
 def student_for_user(user):
     return StudentProfile.objects.filter(user=user).first()
 
@@ -364,8 +395,15 @@ class ExamSessionSerializer(serializers.ModelSerializer):
 
 
 class ExamVideoSerializer(serializers.ModelSerializer):
+    exam_session = serializers.PrimaryKeyRelatedField(queryset=ExamSession.objects.all(), required=False)
     uploaded_by_username = serializers.CharField(source="uploaded_by.username", read_only=True)
     exam_course = serializers.CharField(source="exam_session.course.code", read_only=True)
+    original_filename = serializers.CharField(required=False, allow_blank=True)
+    file_uri = serializers.CharField(required=False, allow_blank=True)
+    file = serializers.FileField(write_only=True, required=False)
+    file_url = serializers.SerializerMethodField()
+    alert_count = serializers.IntegerField(source="alerts.count", read_only=True)
+    result = serializers.SerializerMethodField()
 
     class Meta:
         model = ExamVideo
@@ -377,18 +415,91 @@ class ExamVideoSerializer(serializers.ModelSerializer):
             "uploaded_by_username",
             "original_filename",
             "file_uri",
+            "file",
+            "file_url",
             "status",
             "notes",
+            "analysis_started_at",
+            "analysis_completed_at",
+            "frames_analyzed",
+            "duration_seconds",
+            "error_message",
+            "analysis_report",
+            "result",
+            "alert_count",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["uploaded_by", "created_at", "updated_at"]
+        read_only_fields = [
+            "uploaded_by",
+            "file_url",
+            "status",
+            "analysis_started_at",
+            "analysis_completed_at",
+            "frames_analyzed",
+            "duration_seconds",
+            "error_message",
+            "analysis_report",
+            "result",
+            "alert_count",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_file_url(self, video):
+        if not video.file_uri:
+            return ""
+        if video.file_uri.startswith(("http://", "https://", "/", "file://")):
+            return video.file_uri
+        return default_storage.url(video.file_uri)
+
+    def get_result(self, video):
+        result = getattr(video, "result", None)
+        if result is None:
+            return None
+        return ExamVideoAnalysisResultSerializer(result).data
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if self.instance is None and not attrs.get("file") and not attrs.get("file_uri"):
+            raise serializers.ValidationError("Upload a video file or provide file_uri.")
+        return attrs
 
     def create(self, validated_data):
         request = self.context["request"]
+        upload = validated_data.pop("file", None)
+        validated_data.setdefault("exam_session", default_upload_exam_session())
         validated_data["uploaded_by"] = request_user(request)
+        if upload is not None:
+            original_filename = get_valid_filename(Path(upload.name).name or "exam-video.mp4")
+            extension = Path(original_filename).suffix.lower() or ".mp4"
+            storage_name = f"exam_videos/{uuid4().hex}{extension}"
+            validated_data["file_uri"] = default_storage.save(storage_name, upload)
+            validated_data.setdefault("original_filename", original_filename)
         return super().create(validated_data)
 
+
+class ExamVideoAnalysisResultSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ExamVideoAnalysisResult
+        fields = [
+            "id",
+            "model_name",
+            "report_uri",
+            "session_uri",
+            "annotated_video_uri",
+            "latest_preview_uri",
+            "frames_analyzed",
+            "current_frame",
+            "total_frames",
+            "progress_percent",
+            "duration_seconds",
+            "total_alerts",
+            "alert_counts",
+            "latest_status",
+            "created_at",
+            "updated_at",
+        ]
 
 class ExamAttemptSerializer(serializers.ModelSerializer):
     course_code = serializers.CharField(source="exam_session.course.code", read_only=True)

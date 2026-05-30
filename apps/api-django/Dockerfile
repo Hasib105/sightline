@@ -10,9 +10,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY apps/api-django/requirements.txt ./apps/api-django/requirements.txt
+COPY pyproject.toml uv.lock requirements.txt ./
 RUN python -m pip install --upgrade pip \
-    && python -m pip install -r apps/api-django/requirements.txt
+    && python -m pip install uv \
+    && uv sync --frozen --no-dev
 
 COPY apps/api-django ./apps/api-django
 COPY docker/api/entrypoint.sh ./docker/api/entrypoint.sh
@@ -20,6 +21,7 @@ COPY docker/api/entrypoint.sh ./docker/api/entrypoint.sh
 RUN chmod +x ./docker/api/entrypoint.sh
 
 WORKDIR /app/apps/api-django
+ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
 
 ENTRYPOINT ["/app/docker/api/entrypoint.sh"]

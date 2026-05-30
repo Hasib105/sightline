@@ -64,7 +64,18 @@ export default async function DashboardPage() {
           <Video className="mb-3 size-5 text-slate-500" />
           <p className="text-sm text-slate-600">The teacher workspace now covers the core course, exam, material, and risk workflows.</p>
         </ConsolePanel>
-        <ConsolePanel title="Invigilator" description="Reviews suspicious moments with evidence.">
+        <ConsolePanel
+          title="Invigilator"
+          description="Reviews suspicious moments with evidence."
+          actions={
+            user.role === "invigilator" || user.role === "admin" || user.is_superuser ? (
+              <Link href="/dashboard/invigilator" className="dashboard-link-button">
+                <ShieldCheck className="size-3.5" />
+                Open review
+              </Link>
+            ) : null
+          }
+        >
           <ShieldCheck className="mb-3 size-5 text-slate-500" />
           <p className="text-sm text-slate-600">Alert review stays human-controlled and audit-friendly.</p>
         </ConsolePanel>

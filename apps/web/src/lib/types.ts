@@ -37,6 +37,92 @@ export interface NotificationReadResponse {
   unread_count: number;
 }
 
+export type IntegrityAlertType = "look_away" | "neighboring_desk" | "unauthorized_device";
+export type IntegrityAlertStatus = "detected" | "visible" | "confirmed" | "dismissed" | "follow_up" | "closed";
+export type IntegrityAlertDecision = "confirmed" | "dismissed" | "follow_up";
+
+export interface IntegrityAlertEvidenceAsset {
+  id: number;
+  kind: string;
+  uri: string;
+  capturedAt: string;
+  qualityNote: string;
+}
+
+export interface IntegrityAlertReviewAction {
+  id: number;
+  reviewer: string;
+  decision: IntegrityAlertDecision;
+  note: string;
+  createdAt: string;
+}
+
+export interface IntegrityAlertWindow {
+  startedAt: string;
+  endedAt: string;
+}
+
+export interface IntegrityAlertCamera {
+  id: number;
+  name: string;
+  status: string;
+}
+
+export interface IntegrityAlertSeat {
+  id: number;
+  label: string;
+}
+
+export interface IntegrityAlertExamSession {
+  id: number;
+  course: string;
+  courseTitle: string;
+  hall: string;
+  status: string;
+}
+
+export interface IntegrityAlertExamVideo {
+  id: number;
+  originalFilename: string;
+  status: string;
+}
+
+export interface IntegrityAlertSummary {
+  id: number;
+  alertType: IntegrityAlertType;
+  alertTypeLabel: string;
+  status: IntegrityAlertStatus;
+  summary: string;
+  occurredAt: string;
+  window: IntegrityAlertWindow;
+  confidenceScore: number;
+  visibilityQuality: string;
+  metadata: Record<string, JsonValue>;
+  examSession: IntegrityAlertExamSession;
+  examVideo: IntegrityAlertExamVideo | null;
+  camera: IntegrityAlertCamera;
+  seat: IntegrityAlertSeat | null;
+}
+
+export interface IntegrityAlertDetail extends IntegrityAlertSummary {
+  evidenceAssets: IntegrityAlertEvidenceAsset[];
+  reviewActions: IntegrityAlertReviewAction[];
+}
+
+export interface IntegrityAlertsResponse {
+  alerts: IntegrityAlertSummary[];
+}
+
+export interface IntegrityAlertResponse {
+  alert: IntegrityAlertDetail;
+}
+
+export interface IntegrityAlertReviewPayload {
+  decision: IntegrityAlertDecision;
+  reviewerUsername?: string;
+  note?: string;
+}
+
 export interface ApiKey {
   id: number;
   name: string;
@@ -586,6 +672,48 @@ export interface ExamAttemptSummary {
   status: "started" | "submitted" | "reviewed";
   answers: Record<string, JsonValue>;
   submitted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExamVideoAnalysisResult {
+  id: number;
+  model_name: string;
+  report_uri: string;
+  session_uri: string;
+  annotated_video_uri: string;
+  latest_preview_uri: string;
+  frames_analyzed: number;
+  current_frame: number;
+  total_frames: number;
+  progress_percent: number;
+  duration_seconds: string;
+  total_alerts: number;
+  alert_counts: Record<string, JsonValue>;
+  latest_status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExamVideoSummary {
+  id: number;
+  exam_session: number;
+  exam_course: string;
+  uploaded_by: number | null;
+  uploaded_by_username: string | null;
+  original_filename: string;
+  file_uri: string;
+  file_url: string;
+  status: "uploaded" | "analyzing" | "completed" | "failed";
+  notes: string;
+  analysis_started_at: string | null;
+  analysis_completed_at: string | null;
+  frames_analyzed: number;
+  duration_seconds: string;
+  error_message: string;
+  analysis_report: Record<string, JsonValue>;
+  result: ExamVideoAnalysisResult | null;
+  alert_count: number;
   created_at: string;
   updated_at: string;
 }

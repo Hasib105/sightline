@@ -30,7 +30,13 @@ import type {
   ExamCreatePayload,
   ExamAttemptSummary,
   ExamSessionSummary,
+  ExamVideoSummary,
   FeatureFlag,
+  IntegrityAlertDetail,
+  IntegrityAlertResponse,
+  IntegrityAlertReviewPayload,
+  IntegrityAlertsResponse,
+  IntegrityAlertSummary,
   JsonValue,
   McpConfig,
   NotificationItem,
@@ -100,6 +106,31 @@ export async function markAllNotificationsRead(): Promise<NotificationReadRespon
     method: "POST",
   });
   return parseResponse<NotificationReadResponse>(response);
+}
+
+export async function listIntegrityAlerts(): Promise<IntegrityAlertSummary[]> {
+  const response = await apiFetchClient("/api/integrity/alerts/");
+  const payload = await parseResponse<IntegrityAlertsResponse>(response);
+  return payload.alerts;
+}
+
+export async function getIntegrityAlert(alertId: number): Promise<IntegrityAlertDetail> {
+  const response = await apiFetchClient(`/api/integrity/alerts/${alertId}/`);
+  const payload = await parseResponse<IntegrityAlertResponse>(response);
+  return payload.alert;
+}
+
+export async function reviewIntegrityAlert(
+  alertId: number,
+  payload: IntegrityAlertReviewPayload
+): Promise<IntegrityAlertDetail> {
+  const response = await apiFetchClient(`/api/integrity/alerts/${alertId}/review/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await parseResponse<IntegrityAlertResponse>(response);
+  return data.alert;
 }
 
 export async function createApiKey(name: string): Promise<ApiKeyCreated> {
@@ -654,6 +685,42 @@ export async function submitExamAttempt(
     body: JSON.stringify({ answers }),
   });
   return parseResponse<ExamAttemptSummary>(response);
+}
+
+export async function listExamVideos(): Promise<ExamVideoSummary[]> {
+  const response = await apiFetchClient("/api/v1/exam-videos");
+  return parseResponse<ExamVideoSummary[]>(response);
+}
+
+export async function uploadExamVideo(payload: {
+  file: File;
+  notes?: string;
+}): Promise<ExamVideoSummary> {
+  const formData = new FormData();
+  formData.append("file", payload.file);
+  formData.append("original_filename", payload.file.name);
+  if (payload.notes) {
+    formData.append("notes", payload.notes);
+  }
+  const response = await apiFetchClient("/api/v1/exam-videos", {
+    method: "POST",
+    body: formData,
+  });
+  return parseResponse<ExamVideoSummary>(response);
+}
+
+export async function startExamVideoAnalysis(videoId: number): Promise<ExamVideoSummary> {
+  const response = await apiFetchClient(`/api/v1/exam-videos/${videoId}/analyze`, {
+    method: "POST",
+  });
+  return parseResponse<ExamVideoSummary>(response);
+}
+
+export async function deleteExamVideo(videoId: number): Promise<{ deleted: boolean; record_id: number }> {
+  const response = await apiFetchClient(`/api/v1/exam-videos/${videoId}`, {
+    method: "DELETE",
+  });
+  return parseResponse<{ deleted: boolean; record_id: number }>(response);
 }
 
 export async function listAtRiskScores(): Promise<StudentRiskScore[]> {

@@ -14,3 +14,15 @@ export function apiBaseUrl(): string {
   }
   return "";
 }
+
+export function apiMediaBaseUrl(): string {
+  if (typeof window === "undefined") {
+    return normalizeBaseUrl(process.env.API_INTERNAL_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || DEFAULT_API_BASE_URL);
+  }
+  return normalizeBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL || DEFAULT_API_BASE_URL);
+}
+
+export function apiWebSocketBaseUrl(): string {
+  const baseUrl = apiMediaBaseUrl();
+  return baseUrl.replace(/^https:/, "wss:").replace(/^http:/, "ws:");
+}

@@ -46,6 +46,30 @@ services:
       - "8000:8000"
     volumes:
       - sightline-static:/app/apps/api-django/staticfiles
+      - sightline-media:/app/apps/api-django/media
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api-django/Dockerfile
+    command: celery -A sightline_api worker -l info
+    environment:
+      DATABASE_URL: postgres://sightline:sightline@db:5432/sightline
+      CELERY_BROKER_URL: redis://redis:6379/0
+      SIGHTLINE_DEBUG: "1"
+      SIGHTLINE_SECRET_KEY: dev-only-sightline-secret
+      SIGHTLINE_SKIP_MIGRATIONS: "1"
+      SIGHTLINE_COLLECTSTATIC: "0"
+      SIGHTLINE_ANALYSIS_THREAD_FALLBACK: "0"
+      EXAM_AI_ANALYSIS_FPS: "2.0"
+      EXAM_AI_MODEL_SIZE: n
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - sightline-media:/app/apps/api-django/media
 
   web:
     build:
@@ -70,3 +94,4 @@ services:
 volumes:
   sightline-postgres:
   sightline-static:
+  sightline-media:
