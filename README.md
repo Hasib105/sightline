@@ -100,10 +100,34 @@ For local development, SQLite is enough. PostgreSQL, Redis, object storage, and 
 
 ## Running Locally
 
+Use this path when you want to run the API and web app directly on your machine.
+
 Prerequisites:
 
-- Python 3.12+
-- Node.js 22+
+- Python 3.12
+- Node.js 22
+- pnpm
+
+Install `pnpm` if you do not already have it:
+
+```bash
+corepack enable
+corepack prepare pnpm@10.14.0 --activate
+```
+
+Create your local env file:
+
+```bash
+cp .env.example .env
+```
+
+On Windows PowerShell, use:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+The default `.env.example` is ready for normal local development. It uses SQLite unless you uncomment `DATABASE_URL`.
 
 Install dependencies:
 
@@ -112,34 +136,76 @@ pnpm install
 pnpm run api:install
 ```
 
-Create the local database and seed demo data:
+Create the local database and seed demo users:
 
 ```bash
 pnpm run api:migrate
 pnpm run api:seed
 ```
 
-Start the API and web app:
+Start both apps:
 
 ```bash
 pnpm run dev
 ```
 
-Open `http://localhost:3000`.
+Open:
+
+- Web app: `http://localhost:3000`
+- API: `http://127.0.0.1:8000/api/`
+- Django admin: `http://127.0.0.1:8000/admin/`
+
+Demo users all use password `sightline`:
+
+- `admin`
+- `teacher`
+- `invigilator`
+- `student`
+
+Useful local commands:
+
+```bash
+pnpm run api:migrate
+pnpm run api:seed
+pnpm run web:lint
+pnpm run web:build
+```
 
 ## Running With Docker
 
-Build and start the web app, Django API, PostgreSQL, and Redis:
+Use this path when you want Docker to run the whole stack for you: Next.js web, Django API, Celery worker, PostgreSQL, Redis, and nginx.
+
+Prerequisites:
+
+- Docker Desktop, or Docker Engine with Docker Compose
+- pnpm, only for the helper scripts
+
+Create a local env file if you do not already have one:
+
+```bash
+cp .env.example .env
+```
+
+On Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Build and start the stack:
 
 ```bash
 pnpm run docker:up
 ```
 
-Then open:
+The first Docker build can take a while because it installs Python, Node, and AI/video-analysis dependencies.
 
-- Web: `http://localhost:3000`
-- API: `http://localhost:8000`
-- Django admin: `http://localhost:8000/admin/`
+Open:
+
+- Main app through nginx: `http://localhost`
+- Web app directly: `http://localhost:3000`
+- API directly: `http://localhost:8000/api/`
+- Django admin directly: `http://localhost:8000/admin/`
 
 Seed demo users after the API container is running:
 
@@ -153,12 +219,17 @@ Stop the stack:
 pnpm run docker:down
 ```
 
-Demo users all use password `sightline`:
+Reset Docker data completely, including PostgreSQL data and uploaded media:
 
-- `admin`
-- `teacher`
-- `invigilator`
-- `student`
+```bash
+docker compose down -v
+```
+
+View container logs:
+
+```bash
+docker compose logs -f
+```
 
 ## Production CI/CD
 
@@ -175,6 +246,8 @@ Required server dependencies:
 - Docker Compose v2, or legacy `docker-compose`
 
 Configure the secrets from `.env.production.example` in GitHub, then push to `main` or run `Deploy Production` manually from GitHub Actions. The deploy job creates `/opt/sightline`, writes `.env`, `docker-compose.yml`, and nginx config there, pulls the latest GHCR images, starts the stack, waits for nginx health, and prunes old Docker resources.
+
+By default, production nginx binds to host port `3322` to avoid conflicts with any existing web server on ports `80` or `443`. Put a reverse proxy such as Caddy, nginx, or Cloudflare Tunnel in front of `http://127.0.0.1:3322` for `https://memofi.tech`.
 
 To validate the production compose file locally, provide the required image/database variables and run:
 
