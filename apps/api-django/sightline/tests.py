@@ -1,3 +1,5 @@
+import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.management import call_command
@@ -117,6 +119,7 @@ class SightlineApiSmokeTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(CourseMaterial.objects.filter(course=course).count(), existing_materials + 1)
 
+    @patch.dict(os.environ, {"GROQ_API_KEY": ""})
     def test_teacher_can_create_unit_and_student_can_chat_about_it(self):
         self.assertTrue(self.client.login(username="teacher", password="sightline"))
         course = Course.objects.get(code="CSE-321")
@@ -157,6 +160,31 @@ class SightlineApiSmokeTests(TestCase):
         )
         self.assertEqual(message_response.status_code, 201)
         self.assertEqual(CourseChatMessage.objects.filter(thread_id=thread_response.json()["id"]).count(), 2)
+
+    @patch.dict(os.environ, {"GROQ_API_KEY": "test-groq-key", "GROQ_CHAT_MODEL": "test-groq-model"})
+    @patch("sightline.course_rag.Groq")
+    def test_course_chat_uses_groq_when_configured(self, groq_client):
+        groq_client.return_value.chat.completions.create.return_value.choices = [
+            SimpleNamespace(message=SimpleNamespace(content="A generated course answer [1]"))
+        ]
+        self.assertTrue(self.client.login(username="student", password="sightline"))
+        course = Course.objects.get(code="CSE-321")
+        thread_response = self.client.post(
+            "/api/v1/course-chat-threads",
+            data={"course": course.id, "title": "Groq help"},
+            content_type="application/json",
+        )
+
+        response = self.client.post(
+            f"/api/v1/course-chat-threads/{thread_response.json()['id']}/messages",
+            data={"message": "What should I review?"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["messages"][-1]["content"], "A generated course answer [1]")
+        groq_client.assert_called_once_with(api_key="test-groq-key")
+        self.assertEqual(groq_client.return_value.chat.completions.create.call_args.kwargs["model"], "test-groq-model")
 
     def test_teacher_can_delete_unit_with_attached_content(self):
         self.assertTrue(self.client.login(username="teacher", password="sightline"))

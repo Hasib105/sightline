@@ -18,6 +18,7 @@ dependencies = [
   "ultralytics>=8.2,<9.0",
   "lap>=0.5.12",
   "mediapipe==0.10.21",
+  "groq>=0.33,<1.0",
 ]
 
 [tool.uv]
