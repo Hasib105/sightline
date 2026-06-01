@@ -14,6 +14,7 @@ from .exam_detection.config import CFG
 from .course_rag import retrieve_course_context
 from .models import (
     Course,
+    CourseEnrollment,
     CourseChatMessage,
     CourseChatThread,
     CourseMaterial,
@@ -118,6 +119,27 @@ class SightlineApiSmokeTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+    def test_student_sees_exams_only_for_active_course_enrollments(self):
+        self.assertTrue(self.client.login(username="student", password="sightline"))
+        enrolled_exam = ExamSession.objects.get(course__code="CSE-321")
+        unenrolled_exam = ExamSession.objects.get(course__code="CSE-335")
+
+        response = self.client.get("/api/v1/exams")
+
+        self.assertEqual(response.status_code, 200)
+        exam_ids = [exam["id"] for exam in response.json()]
+        self.assertIn(enrolled_exam.id, exam_ids)
+        self.assertNotIn(unenrolled_exam.id, exam_ids)
+
+        enrollment = CourseEnrollment.objects.get(course=enrolled_exam.course, student__user__username="student")
+        enrollment.status = CourseEnrollment.STATUS_DROPPED
+        enrollment.save(update_fields=["status", "updated_at"])
+
+        response = self.client.get("/api/v1/exams")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(enrolled_exam.id, [exam["id"] for exam in response.json()])
 
     @patch("sightline.views.queue_course_material_index")
     def test_teacher_can_upload_course_material(self, queue_course_material_index):

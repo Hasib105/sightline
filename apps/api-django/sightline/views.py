@@ -536,7 +536,14 @@ class ApiV1DispatchView(SessionlessAPIView):
                     queryset = queryset.filter(course__teacher=django_user(request))
                 elif user_role(request) == UserProfile.ROLE_STUDENT and not is_admin_request(request):
                     student = serializers.student_for_user(django_user(request))
-                    course_ids = CourseEnrollment.objects.filter(student=student).values_list("course_id", flat=True) if student else []
+                    course_ids = (
+                        CourseEnrollment.objects.filter(
+                            student=student,
+                            status=CourseEnrollment.STATUS_ACTIVE,
+                        ).values_list("course_id", flat=True)
+                        if student
+                        else []
+                    )
                     queryset = queryset.filter(course_id__in=course_ids)
                 return Response(serializers.ExamSessionSerializer(queryset, many=True).data)
             if request.method == "POST":
