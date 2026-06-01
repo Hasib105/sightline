@@ -176,12 +176,16 @@ jobs:
                 '' close;
             }
 
+            resolver 127.0.0.11 valid=10s ipv6=off;
+
             upstream sightline_api {
-                server api:8000;
+                zone sightline_api 64k;
+                server api:8000 resolve;
             }
 
             upstream sightline_web {
-                server web:3000;
+                zone sightline_web 64k;
+                server web:3000 resolve;
             }
 
             server {
@@ -439,6 +443,9 @@ jobs:
               $COMPOSE_CMD ps
               exit 1
             fi
+
+            $COMPOSE_CMD exec -T nginx nginx -t
+            $COMPOSE_CMD exec -T nginx nginx -s reload
 
             echo "Initial service status:"
             $COMPOSE_CMD ps
