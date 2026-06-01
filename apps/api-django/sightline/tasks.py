@@ -12,6 +12,7 @@ _analysis_executor = ThreadPoolExecutor(
     max_workers=max(1, int(getattr(settings, "SIGHTLINE_ANALYSIS_WORKERS", 1))),
     thread_name_prefix="sightline-yolo",
 )
+_course_index_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sightline-course-index")
 _analysis_futures: dict[int, Future] = {}
 _analysis_lock = Lock()
 
@@ -19,6 +20,25 @@ _analysis_lock = Lock()
 @shared_task
 def generate_due_notifications_task():
     return len(generate_due_notifications())
+
+
+@shared_task
+def index_course_material_task(material_id):
+    from .course_rag import index_material
+    from .models import CourseMaterial
+
+    material = CourseMaterial.objects.filter(id=material_id).first()
+    return index_material(material) if material else 0
+
+
+def queue_course_material_index(material_id):
+    try:
+        result = index_course_material_task.delay(material_id)
+        return {"mode": "celery", "task_id": result.id}
+    except Exception:
+        logger.exception("Celery course material indexing queue failed; using a background thread.")
+        future = _course_index_executor.submit(index_course_material_task.run, material_id)
+        return {"mode": "realtime-thread", "task_id": None, "future_id": id(future)}
 
 
 def queue_exam_video_analysis(video_id):

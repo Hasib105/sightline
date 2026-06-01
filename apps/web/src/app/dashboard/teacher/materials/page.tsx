@@ -111,8 +111,8 @@ export default function TeacherMaterialsPage() {
     onSuccess: async () => {
       setMessage(
         selectedUnit
-          ? `Content item saved in Unit ${selectedUnit.order}. You can add another item to the same unit.`
-          : "Course-level content item saved."
+          ? `Content item saved in Unit ${selectedUnit.order}. Chat indexing is queued.`
+          : "Course-level content item saved. Chat indexing is queued."
       );
       setTitle("");
       setDescription("");

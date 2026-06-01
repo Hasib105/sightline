@@ -1,16 +1,21 @@
 import os
+from contextlib import nullcontext
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from .exam_detection.config import CFG
+from .course_rag import retrieve_course_context
 from .models import (
     Course,
     CourseChatMessage,
+    CourseChatThread,
     CourseMaterial,
     CourseUnit,
     ExamAttempt,
@@ -20,6 +25,7 @@ from .models import (
     NotificationEvent,
     StudentRiskScore,
 )
+from .tasks import index_course_material_task
 
 
 class SightlineApiSmokeTests(TestCase):
@@ -29,6 +35,20 @@ class SightlineApiSmokeTests(TestCase):
 
     def setUp(self):
         self.client = Client()
+        self.temp_dir = TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self.temp_dir.cleanup)
+        self.media_settings = override_settings(MEDIA_ROOT=Path(self.temp_dir.name) / "media")
+        self.media_settings.enable()
+        self.addCleanup(self.media_settings.disable)
+        self.env_patch = patch.dict(
+            os.environ,
+            {
+                "SIGHTLINE_CHROMA_PATH": str(Path(self.temp_dir.name) / "chroma"),
+                "SIGHTLINE_CHAT_CHECKPOINT_PATH": str(Path(self.temp_dir.name) / "checkpoints.sqlite3"),
+            },
+        )
+        self.env_patch.start()
+        self.addCleanup(self.env_patch.stop)
 
     def test_core_dashboards_load(self):
         for path in [
@@ -99,25 +119,49 @@ class SightlineApiSmokeTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_teacher_can_upload_course_material(self):
+    @patch("sightline.views.queue_course_material_index")
+    def test_teacher_can_upload_course_material(self, queue_course_material_index):
         self.assertTrue(self.client.login(username="teacher", password="sightline"))
         course = Course.objects.get(code="CSE-321")
         existing_materials = CourseMaterial.objects.filter(course=course).count()
 
-        response = self.client.post(
-            f"/api/v1/courses/{course.id}/materials",
-            data={
-                "kind": "slide",
-                "title": "Week 2 Slides",
-                "description": "Divide and conquer notes.",
-                "uri": "file://demo/cse-321-week-2.pdf",
-                "original_filename": "cse-321-week-2.pdf",
-            },
-            content_type="application/json",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/api/v1/courses/{course.id}/materials",
+                data={
+                    "kind": "slide",
+                    "title": "Week 2 Slides",
+                    "description": "Divide and conquer notes.",
+                    "uri": "file://demo/cse-321-week-2.pdf",
+                    "original_filename": "cse-321-week-2.pdf",
+                },
+                content_type="application/json",
+            )
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(CourseMaterial.objects.filter(course=course).count(), existing_materials + 1)
+        queue_course_material_index.assert_called_once_with(response.json()["id"])
+
+    def test_background_indexing_extracts_uploaded_text_into_chroma(self):
+        self.assertTrue(self.client.login(username="teacher", password="sightline"))
+        course = Course.objects.get(code="CSE-321")
+        response = self.client.post(
+            f"/api/v1/courses/{course.id}/materials",
+            data={
+                "kind": "doc",
+                "title": "Searchable upload",
+                "file": SimpleUploadedFile("searchable.txt", b"Quicksort uses partitioning around a pivot."),
+            },
+        )
+        material = CourseMaterial.objects.get(id=response.json()["id"])
+
+        indexed_chunks = index_course_material_task.run(material.id)
+        contexts = retrieve_course_context(course, "How does quicksort use a pivot?")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertGreater(indexed_chunks, 0)
+        self.assertIn("partitioning around a pivot", contexts[0]["text"])
+        self.assertIsNotNone(CourseMaterial.objects.get(id=material.id).indexed_at)
 
     @patch.dict(os.environ, {"GROQ_API_KEY": ""})
     def test_teacher_can_create_unit_and_student_can_chat_about_it(self):
@@ -162,11 +206,14 @@ class SightlineApiSmokeTests(TestCase):
         self.assertEqual(CourseChatMessage.objects.filter(thread_id=thread_response.json()["id"]).count(), 2)
 
     @patch.dict(os.environ, {"GROQ_API_KEY": "test-groq-key", "GROQ_CHAT_MODEL": "test-groq-model"})
-    @patch("sightline.course_rag.Groq")
-    def test_course_chat_uses_groq_when_configured(self, groq_client):
-        groq_client.return_value.chat.completions.create.return_value.choices = [
-            SimpleNamespace(message=SimpleNamespace(content="A generated course answer [1]"))
-        ]
+    @patch("sightline.course_rag.course_chat_checkpointer")
+    @patch("sightline.course_rag.create_agent")
+    @patch("sightline.course_rag.ChatGroq")
+    def test_course_chat_uses_langchain_agent_with_thread_memory(self, chat_groq, create_agent_mock, checkpointer):
+        checkpointer.return_value = nullcontext("test-checkpointer")
+        create_agent_mock.return_value.invoke.return_value = {
+            "messages": [SimpleNamespace(content="A generated course answer [1]")]
+        }
         self.assertTrue(self.client.login(username="student", password="sightline"))
         course = Course.objects.get(code="CSE-321")
         thread_response = self.client.post(
@@ -183,8 +230,40 @@ class SightlineApiSmokeTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["messages"][-1]["content"], "A generated course answer [1]")
-        groq_client.assert_called_once_with(api_key="test-groq-key")
-        self.assertEqual(groq_client.return_value.chat.completions.create.call_args.kwargs["model"], "test-groq-model")
+        chat_groq.assert_called_once_with(
+            api_key="test-groq-key",
+            model="test-groq-model",
+            temperature=0.2,
+            max_tokens=700,
+        )
+        agent_kwargs = create_agent_mock.call_args.kwargs
+        self.assertEqual(agent_kwargs["checkpointer"], "test-checkpointer")
+        self.assertEqual(len(agent_kwargs["tools"]), 1)
+        thread = CourseChatThread.objects.get(id=thread_response.json()["id"])
+        self.assertEqual(
+            create_agent_mock.return_value.invoke.call_args.kwargs["config"],
+            {"configurable": {"thread_id": thread.checkpoint_thread_id}},
+        )
+        self.assertNotIn("checkpoint_thread_id", response.json())
+
+    def test_student_cannot_list_or_open_another_students_chat_thread(self):
+        self.assertTrue(self.client.login(username="student", password="sightline"))
+        course = Course.objects.get(code="CSE-321")
+        thread_response = self.client.post(
+            "/api/v1/course-chat-threads",
+            data={"course": course.id, "title": "Private study thread"},
+            content_type="application/json",
+        )
+        thread_id = thread_response.json()["id"]
+        self.client.logout()
+
+        self.assertTrue(self.client.login(username="student02", password="sightline"))
+        list_response = self.client.get(f"/api/v1/course-chat-threads?course={course.id}")
+        detail_response = self.client.get(f"/api/v1/course-chat-threads/{thread_id}")
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertNotIn(thread_id, [thread["id"] for thread in list_response.json()])
+        self.assertEqual(detail_response.status_code, 403)
 
     def test_teacher_can_delete_unit_with_attached_content(self):
         self.assertTrue(self.client.login(username="teacher", password="sightline"))

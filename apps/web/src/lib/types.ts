@@ -656,7 +656,6 @@ export interface CourseChatThread {
   unit: number | null;
   unit_title: string | null;
   title: string;
-  checkpoint_thread_id: string;
   messages: CourseChatMessage[];
   created_at: string;
   updated_at: string;

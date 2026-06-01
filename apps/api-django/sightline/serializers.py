@@ -418,12 +418,11 @@ class CourseChatThreadSerializer(serializers.ModelSerializer):
             "unit",
             "unit_title",
             "title",
-            "checkpoint_thread_id",
             "messages",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["checkpoint_thread_id", "created_at", "updated_at"]
+        read_only_fields = ["created_at", "updated_at"]
 
 
 class CourseEnrollmentSerializer(serializers.ModelSerializer):

@@ -33,6 +33,20 @@ services:
     networks:
       - sightline
 
+  chroma:
+    image: chromadb/chroma:1.5.9
+    container_name: sightline-chroma
+    volumes:
+      - sightline-chroma:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - sightline
+
   api:
     image: ${GHCR_API_IMAGE}
     container_name: sightline-api
@@ -41,6 +55,8 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-sightline}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-sightline}
       CELERY_BROKER_URL: redis://redis:6379/0
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
       SIGHTLINE_DEBUG: "0"
       SIGHTLINE_COLLECTSTATIC: "1"
     volumes:
@@ -50,6 +66,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      chroma:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/ >/dev/null || exit 1"]
@@ -70,6 +88,8 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-sightline}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-sightline}
       CELERY_BROKER_URL: redis://redis:6379/0
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
       SIGHTLINE_DEBUG: "0"
       SIGHTLINE_SKIP_MIGRATIONS: "1"
       SIGHTLINE_COLLECTSTATIC: "0"
@@ -82,6 +102,8 @@ services:
       api:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      chroma:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -138,6 +160,7 @@ volumes:
   sightline-redis:
   sightline-static:
   sightline-media:
+  sightline-chroma:
 
 networks:
   sightline:

@@ -31,6 +31,8 @@ db.sqlite3
 *.sqlite3
 *.log
 apps/api-django/media/
+apps/api-django/chroma/
+apps/api-django/course_chat_checkpoints.sqlite3
 
 # OS and editor noise
 .DS_Store

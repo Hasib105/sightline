@@ -18,7 +18,13 @@ dependencies = [
   "ultralytics>=8.2,<9.0",
   "lap>=0.5.12",
   "mediapipe==0.10.21",
-  "groq>=0.33,<1.0",
+  "langchain>=1.0,<2.0",
+  "langchain-groq>=1.0,<2.0",
+  "langgraph-checkpoint-sqlite>=3.0,<4.0",
+  "langgraph-checkpoint-postgres>=3.0,<4.0",
+  "chromadb>=1.0,<2.0",
+  "pypdf>=5.0,<7.0",
+  "python-docx>=1.1,<2.0",
 ]
 
 [tool.uv]

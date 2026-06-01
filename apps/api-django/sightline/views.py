@@ -8,6 +8,7 @@ from django.conf import settings
 from django.contrib.auth import authenticate, get_user, login as django_login, logout as django_logout
 from django.contrib.auth.models import User
 from django.core.files.storage import default_storage
+from django.db import transaction
 from django.db.models import Count
 from django.http import JsonResponse, StreamingHttpResponse
 from django.utils import timezone
@@ -42,8 +43,9 @@ from .models import (
     StudentRiskScore,
     UserProfile,
 )
-from .course_rag import answer_course_question, index_course, index_material
+from .course_rag import answer_course_question, index_course, remove_material_index
 from .services import agenda_for_student, calculate_risk_run, generate_due_notifications
+from .tasks import queue_course_material_index
 
 
 def django_user(request):
@@ -349,6 +351,8 @@ class ApiV1DispatchView(SessionlessAPIView):
                 if not can_manage_course(request, unit.course):
                     return Response({"detail": "Only the course teacher or admin can delete units."}, status=status.HTTP_403_FORBIDDEN)
                 record_id = unit.id
+                for material in unit.materials.all():
+                    remove_material_index(material)
                 unit.delete()
                 return Response({"deleted": True, "record_id": record_id})
             if len(parts) == 3 and parts[2] == "materials" and request.method == "GET":
@@ -393,7 +397,7 @@ class ApiV1DispatchView(SessionlessAPIView):
                 )
                 serializer.is_valid(raise_exception=True)
                 material = serializer.save()
-                index_material(material)
+                transaction.on_commit(lambda: queue_course_material_index(material.id))
                 return Response(serializers.CourseMaterialSerializer(material).data, status=status.HTTP_201_CREATED)
 
         if clean_path.startswith("course-materials/"):
@@ -415,12 +419,13 @@ class ApiV1DispatchView(SessionlessAPIView):
                 )
                 serializer.is_valid(raise_exception=True)
                 material = serializer.save()
-                index_material(material)
+                transaction.on_commit(lambda: queue_course_material_index(material.id))
                 return Response(serializers.CourseMaterialSerializer(material).data)
             if request.method == "DELETE":
                 if not can_manage_course(request, material.course):
                     return Response({"detail": "Only the course teacher or admin can delete materials."}, status=status.HTTP_403_FORBIDDEN)
                 record_id = material.id
+                remove_material_index(material)
                 material.delete()
                 return Response({"deleted": True, "record_id": record_id})
 

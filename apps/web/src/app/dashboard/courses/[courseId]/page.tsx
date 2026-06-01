@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BookOpenCheck, ClipboardList, FileText, Loader2, MessageSquare, Send } from "lucide-react";
+import { ArrowLeft, BookOpenCheck, ClipboardList, FileText, Loader2, MessageSquare, Plus, Send } from "lucide-react";
 
 import {
   ConsoleEmptyState,
@@ -130,9 +130,10 @@ export default function CourseDetailsPage() {
     ? materials.filter((item) => item.unit === selectedContentUnitId)
     : materials;
   const chatThreads: CourseChatThread[] = chatThreadsQuery.data ?? [];
+  const scopedChatThreads = chatThreads.filter((thread) => thread.unit === selectedChatUnitId);
   const selectedThread =
     chatThreads.find((thread) => thread.id === selectedThreadId) ??
-    chatThreads.find((thread) => thread.unit === selectedChatUnitId) ??
+    scopedChatThreads[0] ??
     (selectedChatUnitId === null ? chatThreads[0] : null) ??
     null;
 
@@ -154,6 +155,29 @@ export default function CourseDetailsPage() {
     { value: "", label: "Whole course" },
     ...units.map((unit) => ({ value: String(unit.id), label: `Unit ${unit.order} · ${unit.title}` })),
   ];
+  const threadOptions = scopedChatThreads.map((thread) => ({
+    value: String(thread.id),
+    label: thread.title,
+  }));
+
+  const createThreadMutation = useMutation({
+    mutationFn: async () => {
+      if (!course) {
+        throw new Error("Course is not loaded yet.");
+      }
+      return createCourseChatThread({
+        course: course.id,
+        unit: selectedChatUnitId,
+        title: `${course.code} ${selectedChatUnitId ? "unit" : "course"} chat ${scopedChatThreads.length + 1}`,
+      });
+    },
+    onSuccess: async (thread) => {
+      setSelectedThreadId(thread.id);
+      setChatMessage(null);
+      await queryClient.invalidateQueries({ queryKey: ["course-chat-threads", courseId] });
+    },
+    onError: (error) => setChatMessage(error instanceof Error ? error.message : "Unable to create a thread."),
+  });
 
   const askMutation = useMutation({
     mutationFn: async () => {
@@ -464,6 +488,26 @@ export default function CourseDetailsPage() {
                     setSelectedThreadId(nextThread?.id ?? null);
                   }}
                   options={unitOptions}
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Thread</label>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => createThreadMutation.mutate()}
+                    disabled={createThreadMutation.isPending}
+                  >
+                    {createThreadMutation.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+                    New thread
+                  </Button>
+                </div>
+                <DashboardSelect
+                  value={selectedThread ? String(selectedThread.id) : ""}
+                  onValueChange={(value) => setSelectedThreadId(value ? Number(value) : null)}
+                  options={threadOptions}
+                  placeholder="No thread yet"
                 />
               </div>
             </div>
