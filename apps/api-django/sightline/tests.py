@@ -43,7 +43,7 @@ class SightlineApiSmokeTests(TestCase):
         self.env_patch = patch.dict(
             os.environ,
             {
-                "SIGHTLINE_CHROMA_PATH": str(Path(self.temp_dir.name) / "chroma"),
+                "SIGHTLINE_QDRANT_PATH": str(Path(self.temp_dir.name) / "qdrant"),
                 "SIGHTLINE_CHAT_CHECKPOINT_PATH": str(Path(self.temp_dir.name) / "checkpoints.sqlite3"),
             },
         )
@@ -142,7 +142,7 @@ class SightlineApiSmokeTests(TestCase):
         self.assertEqual(CourseMaterial.objects.filter(course=course).count(), existing_materials + 1)
         queue_course_material_index.assert_called_once_with(response.json()["id"])
 
-    def test_background_indexing_extracts_uploaded_text_into_chroma(self):
+    def test_background_indexing_extracts_uploaded_text_into_qdrant(self):
         self.assertTrue(self.client.login(username="teacher", password="sightline"))
         course = Course.objects.get(code="CSE-321")
         response = self.client.post(

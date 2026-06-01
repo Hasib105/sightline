@@ -1,11 +1,13 @@
+import atexit
 import hashlib
 import logging
 import math
 import os
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
+from uuid import NAMESPACE_URL, uuid5
 
-import chromadb
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.db import connection
@@ -17,6 +19,7 @@ from langchain_groq import ChatGroq
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 from pypdf import PdfReader
+from qdrant_client import QdrantClient, models
 
 from .models import Course, CourseChatMessage, CourseChatThread, CourseMaterial, CourseUnit
 
@@ -24,6 +27,8 @@ from .models import Course, CourseChatMessage, CourseChatThread, CourseMaterial,
 logger = logging.getLogger(__name__)
 VECTOR_DIMENSIONS = 128
 DEFAULT_GROQ_CHAT_MODEL = "llama-3.3-70b-versatile"
+QDRANT_COLLECTION = "sightline_course_content"
+_qdrant_clients: set[QdrantClient] = set()
 
 
 def _tokenize(text: str) -> list[str]:
@@ -55,21 +60,49 @@ def _chunk_text(text: str, size: int = 900, overlap: int = 140) -> list[str]:
     return chunks
 
 
-def _chroma_collection():
-    host = os.environ.get("CHROMA_HOST", "").strip()
-    if host:
-        client = chromadb.HttpClient(
-            host=host,
-            port=int(os.environ.get("CHROMA_PORT", "8000")),
-            ssl=os.environ.get("CHROMA_SSL", "0").lower() in {"1", "true", "yes"},
-        )
-        return client.get_or_create_collection(name="sightline_course_content")
+@lru_cache(maxsize=None)
+def _qdrant_client(url: str, api_key: str, path_string: str) -> QdrantClient:
+    if url:
+        client = QdrantClient(url=url, api_key=api_key or None)
+    else:
+        path = Path(path_string)
+        path.mkdir(parents=True, exist_ok=True)
+        client = QdrantClient(path=str(path))
+    _qdrant_clients.add(client)
+    return client
 
-    default_path = Path(settings.BASE_DIR) / "chroma"
-    path = Path(os.environ.get("SIGHTLINE_CHROMA_PATH", default_path))
-    path.mkdir(parents=True, exist_ok=True)
-    client = chromadb.PersistentClient(path=str(path))
-    return client.get_or_create_collection(name="sightline_course_content")
+
+@atexit.register
+def _close_qdrant_clients() -> None:
+    for client in tuple(_qdrant_clients):
+        client.close()
+    _qdrant_clients.clear()
+    _qdrant_client.cache_clear()
+
+
+def _qdrant() -> QdrantClient:
+    url = os.environ.get("QDRANT_URL", "").strip()
+    api_key = os.environ.get("QDRANT_API_KEY", "").strip()
+    default_path = Path(settings.BASE_DIR) / "qdrant"
+    path = os.environ.get("SIGHTLINE_QDRANT_PATH", str(default_path))
+    client = _qdrant_client(url, api_key, path)
+    if not client.collection_exists(QDRANT_COLLECTION):
+        client.create_collection(
+            collection_name=QDRANT_COLLECTION,
+            vectors_config=models.VectorParams(size=VECTOR_DIMENSIONS, distance=models.Distance.COSINE),
+        )
+    return client
+
+
+def _material_filter(material: CourseMaterial) -> models.Filter:
+    return models.Filter(
+        must=[
+            models.FieldCondition(
+                key="material_id",
+                match=models.MatchValue(value=str(material.id)),
+            )
+        ]
+    )
 
 
 def _uploaded_file_text(material: CourseMaterial) -> str:
@@ -102,33 +135,43 @@ def _material_text(material: CourseMaterial) -> str:
 
 
 def remove_material_index(material: CourseMaterial) -> None:
-    _chroma_collection().delete(where={"material_id": str(material.id)})
+    _qdrant().delete(
+        collection_name=QDRANT_COLLECTION,
+        points_selector=_material_filter(material),
+        wait=True,
+    )
 
 
 def index_material(material: CourseMaterial) -> int:
-    collection = _chroma_collection()
+    client = _qdrant()
     text = _material_text(material)
     chunks = _chunk_text(text)
-    collection.delete(where={"material_id": str(material.id)})
+    client.delete(
+        collection_name=QDRANT_COLLECTION,
+        points_selector=_material_filter(material),
+        wait=True,
+    )
 
     if chunks:
-        ids = [f"material-{material.id}-{index}" for index, _chunk in enumerate(chunks)]
-        metadatas = [
-            {
-                "course_id": str(material.course_id),
-                "unit_id": str(material.unit_id or ""),
-                "material_id": str(material.id),
-                "title": material.title,
-                "kind": material.kind,
-                "uri": material.uri,
-            }
-            for _chunk in chunks
-        ]
-        collection.upsert(
-            ids=ids,
-            documents=chunks,
-            embeddings=[_embed_text(chunk) for chunk in chunks],
-            metadatas=metadatas,
+        client.upsert(
+            collection_name=QDRANT_COLLECTION,
+            wait=True,
+            points=[
+                models.PointStruct(
+                    id=str(uuid5(NAMESPACE_URL, f"sightline:material:{material.id}:chunk:{index}")),
+                    vector=_embed_text(chunk),
+                    payload={
+                        "course_id": str(material.course_id),
+                        "unit_id": str(material.unit_id or ""),
+                        "material_id": str(material.id),
+                        "title": material.title,
+                        "kind": material.kind,
+                        "uri": material.uri,
+                        "text": chunk,
+                    },
+                )
+                for index, chunk in enumerate(chunks)
+            ],
         )
 
     material.indexed_at = timezone.now()
@@ -144,27 +187,33 @@ def index_course(course: Course) -> int:
 
 
 def retrieve_course_context(course: Course, question: str, unit: CourseUnit | None = None, limit: int = 5) -> list[dict]:
-    collection = _chroma_collection()
-    where = {"course_id": str(course.id)}
+    must = [
+        models.FieldCondition(
+            key="course_id",
+            match=models.MatchValue(value=str(course.id)),
+        )
+    ]
     if unit:
-        where = {"$and": [where, {"unit_id": str(unit.id)}]}
-    result = collection.query(
-        query_embeddings=[_embed_text(question)],
-        n_results=limit,
-        where=where,
-        include=["documents", "metadatas", "distances"],
+        must.append(
+            models.FieldCondition(
+                key="unit_id",
+                match=models.MatchValue(value=str(unit.id)),
+            )
+        )
+    result = _qdrant().query_points(
+        collection_name=QDRANT_COLLECTION,
+        query=_embed_text(question),
+        query_filter=models.Filter(must=must),
+        limit=limit,
     )
-    documents = result.get("documents", [[]])[0]
-    metadatas = result.get("metadatas", [[]])[0]
-    distances = result.get("distances", [[]])[0]
-    if documents:
+    if result.points:
         return [
             {
-                "text": document,
-                "score": float(distance),
-                "metadata": metadata,
+                "text": point.payload.get("text", ""),
+                "score": float(point.score),
+                "metadata": {key: value for key, value in point.payload.items() if key != "text"},
             }
-            for document, metadata, distance in zip(documents, metadatas, distances)
+            for point in result.points
         ]
 
     # Keep local development usable while an uploaded material is waiting for its background indexing job.
