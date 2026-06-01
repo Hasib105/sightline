@@ -282,7 +282,7 @@ jobs:
                 volumes:
                   - sightline-chroma:/data
                 healthcheck:
-                  test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+                  test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8000'"]
                   interval: 10s
                   timeout: 5s
                   retries: 5
@@ -436,7 +436,11 @@ jobs:
             ENV_EOF
 
             $COMPOSE_CMD pull
-            $COMPOSE_CMD up -d --remove-orphans
+            if ! $COMPOSE_CMD up -d --remove-orphans; then
+              $COMPOSE_CMD logs chroma api web worker nginx
+              $COMPOSE_CMD ps
+              exit 1
+            fi
 
             echo "Initial service status:"
             $COMPOSE_CMD ps
