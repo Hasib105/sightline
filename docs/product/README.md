@@ -42,9 +42,9 @@ flowchart TD
 | Detection | Method | Cost | Cadence |
 | --- | --- | --- | --- |
 | TabSwitch | Browser API | Extremely low | Realtime |
-| FaceGone | MediaPipe Face Detector | Low | Every 5 sec |
-| MultiPerson | MediaPipe Face Detector | Low | Every 5 sec |
-| Phone | ONNX/WebGPU tiny model | Medium | Every 15-20 sec |
+| FaceGone | MediaPipe BlazeFace Short-Range FP16 | Low | Every 1 sec |
+| MultiPerson | MediaPipe BlazeFace Short-Range FP16 | Low | Every 1 sec |
+| Phone | MediaPipe EfficientDet-Lite0 INT8 | Low | Every 1 sec |
 
 Build order should still favor the smallest shippable MVP first, then ProcBot.
 

@@ -36,8 +36,8 @@ const FACE_MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite";
 const OBJECT_MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/latest/efficientdet_lite0.tflite";
-const FACE_SAMPLE_MS = 5000;
-const PHONE_SAMPLE_MS = 17000;
+const FACE_SAMPLE_MS = 1000;
+const PHONE_SAMPLE_MS = 1000;
 const FACE_GONE_LIMIT = 2;
 const PHONE_SCORE_LIMIT = 0.45;
 const ALERT_COOLDOWN_MS = 5000;

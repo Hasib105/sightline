@@ -56,15 +56,15 @@ flowchart TD
 | Detection | Method | Cost | Cadence |
 | --- | --- | --- | --- |
 | TabSwitch | Browser API | Extremely low | Realtime |
-| FaceGone | MediaPipe Face Detector | Low | Every 5 sec |
-| MultiPerson | MediaPipe Face Detector | Low | Every 5 sec |
-| Phone | ONNX/WebGPU tiny model | Medium | Every 15-20 sec |
+| FaceGone | MediaPipe BlazeFace Short-Range FP16 | Low | Every 1 sec |
+| MultiPerson | MediaPipe BlazeFace Short-Range FP16 | Low | Every 1 sec |
+| Phone | MediaPipe EfficientDet-Lite0 INT8 | Low | Every 1 sec |
 
 Cadence:
 
 - Realtime: tab switch only.
-- Every 5 sec: face detection and multi-person detection.
-- Every 15-20 sec: phone detection.
+- Every 1 sec: face detection and multi-person detection.
+- Every 1 sec: phone detection.
 
 ## Architecture
 

@@ -80,15 +80,15 @@ flowchart TD
 | Detection | Method | Cost | Cadence |
 | --- | --- | --- | --- |
 | TabSwitch | Browser API | Extremely low | Realtime |
-| FaceGone | MediaPipe Face Detector | Low | Every 5 sec |
-| MultiPerson | MediaPipe Face Detector | Low | Every 5 sec |
-| Phone | ONNX/WebGPU tiny model | Medium | Every 15-20 sec |
+| FaceGone | MediaPipe BlazeFace Short-Range FP16 | Low | Every 1 sec |
+| MultiPerson | MediaPipe BlazeFace Short-Range FP16 | Low | Every 1 sec |
+| Phone | MediaPipe EfficientDet-Lite0 INT8 | Low | Every 1 sec |
 
 ### ProcBot cadence rules
 
 - Realtime: tab switch only.
-- Every 5 sec: face detection and multi-person detection.
-- Every 15-20 sec: phone detection.
+- Every 1 sec: face detection and multi-person detection.
+- Every 1 sec: phone detection.
 
 ## 5) User Stories And Acceptance Criteria
 
@@ -156,8 +156,8 @@ As an `invigilator`, I want ProcBot browser events from BLC quizzes to create da
 | --- | --- |
 | US-06.1 | **WHEN** a student opens a BLC quiz, **THE SYSTEM SHALL** allow the ProcBot extension to activate event logging. |
 | US-06.2 | **WHEN** the tab visibility state changes during the quiz, **THE SYSTEM SHALL** classify TabSwitch in realtime. |
-| US-06.3 | **WHEN** face detection runs every 5 seconds, **THE SYSTEM SHALL** classify FaceGone or MultiPerson when thresholds are met. |
-| US-06.4 | **WHEN** phone detection runs every 15-20 seconds, **THE SYSTEM SHALL** classify Phone when thresholds are met. |
+| US-06.3 | **WHEN** face detection runs every 1 second, **THE SYSTEM SHALL** classify FaceGone or MultiPerson when thresholds are met. |
+| US-06.4 | **WHEN** phone detection runs every 1 second, **THE SYSTEM SHALL** classify Phone when thresholds are met. |
 | US-06.5 | **WHEN** an anomaly is classified, **THE SYSTEM SHALL** send a WebSocket event to FastAPI and show a dashboard alert with an evidence screenshot. |
 
 ## 6) Functional Requirements
@@ -185,7 +185,7 @@ As an `invigilator`, I want ProcBot browser events from BLC quizzes to create da
 | NFR-003 | Auditability | Alerts, evidence, uploads, and review decisions remain inspectable. |
 | NFR-004 | Explainability | Risk and alert outputs show enough context for human review. |
 | NFR-005 | Low latency for ProcBot tab switch | TabSwitch events are realtime. |
-| NFR-006 | Cost-aware browser monitoring | Expensive detection runs less frequently than cheap browser API checks. |
+| NFR-006 | Cost-aware browser monitoring | Lightweight in-browser detectors run at the required cadence without server-side inference. |
 
 ## 8) Release Readiness Checklist
 
@@ -199,5 +199,5 @@ As an `invigilator`, I want ProcBot browser events from BLC quizzes to create da
 - [ ] Invigilator can review alerts and evidence.
 - [ ] Student can enroll in a course.
 - [ ] Student can submit an exam attempt.
-- [ ] ProcBot requirement is designed with realtime tab switch, 5-second face checks, and 15-20-second phone checks.
+- [ ] ProcBot requirement is designed with realtime tab switch, 1-second face checks, and 1-second phone checks.
 

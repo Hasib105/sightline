@@ -8,7 +8,7 @@
 | `Django owns product state` | Users, roles, courses, exams, videos, attempts, alerts, and risk records need one source of truth. |
 | `Human review stays central` | Alerts and risk outputs support people; they do not make final decisions. |
 | `Use admin before custom UI` | Django admin is enough for many admin workflows in the MVP. |
-| `Cost-aware monitoring` | ProcBot should run cheap browser checks realtime and heavier ML checks less frequently. |
+| `Cost-aware monitoring` | ProcBot should use lightweight in-browser detectors at the required cadence. |
 
 ## 2) Runtime Shape
 
@@ -85,8 +85,8 @@ sequenceDiagram
 
     STU->>EXT: Opens BLC quiz
     EXT->>EXT: Tab switch realtime
-    EXT->>EXT: FaceGone/MultiPerson every 5 sec
-    EXT->>EXT: Phone every 15-20 sec
+    EXT->>EXT: FaceGone/MultiPerson every 1 sec
+    EXT->>EXT: Phone every 1 sec
     alt Anomaly classified
         EXT->>FAST: WebSocket event with evidence screenshot
         FAST->>API: Persist alert/evidence
@@ -101,9 +101,9 @@ sequenceDiagram
 | Detection | Method | Cost | Cadence |
 | --- | --- | --- | --- |
 | TabSwitch | Browser API | Extremely low | Realtime |
-| FaceGone | MediaPipe Face Detector | Low | Every 5 sec |
-| MultiPerson | MediaPipe Face Detector | Low | Every 5 sec |
-| Phone | ONNX/WebGPU tiny model | Medium | Every 15-20 sec |
+| FaceGone | MediaPipe BlazeFace Short-Range FP16 | Low | Every 1 sec |
+| MultiPerson | MediaPipe BlazeFace Short-Range FP16 | Low | Every 1 sec |
+| Phone | MediaPipe EfficientDet-Lite0 INT8 | Low | Every 1 sec |
 
 ## 8) Boundaries
 

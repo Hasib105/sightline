@@ -36,8 +36,8 @@ flowchart TD
 Detection cadence:
 
 - Realtime: tab switch only.
-- Every 5 sec: face detection and multi-person detection.
-- Every 15-20 sec: phone detection.
+- Every 1 sec: face detection and multi-person detection.
+- Every 1 sec: phone detection.
 
 Keep these out of the first build unless the user explicitly asks:
 

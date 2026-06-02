@@ -77,15 +77,15 @@ flowchart TD
 | Detection | Method | Cost | Cadence |
 | --- | --- | --- | --- |
 | TabSwitch | Browser API | Extremely low | Realtime |
-| FaceGone | MediaPipe Face Detector | Low | Every 5 sec |
-| MultiPerson | MediaPipe Face Detector | Low | Every 5 sec |
-| Phone | ONNX/WebGPU tiny model | Medium | Every 15-20 sec |
+| FaceGone | MediaPipe BlazeFace Short-Range FP16 | Low | Every 1 sec |
+| MultiPerson | MediaPipe BlazeFace Short-Range FP16 | Low | Every 1 sec |
+| Phone | MediaPipe EfficientDet-Lite0 INT8 | Low | Every 1 sec |
 
 Cadence rules:
 
 - Realtime: tab switch only.
-- Every 5 sec: face detection and multi-person detection.
-- Every 15-20 sec: phone detection.
+- Every 1 sec: face detection and multi-person detection.
+- Every 1 sec: phone detection.
 
 ## 4) Core Domain Entities
 
@@ -184,5 +184,5 @@ erDiagram
 | CP-04 | Alert records are not deleted by review actions. |
 | CP-05 | Evidence remains linked to the alert it explains. |
 | CP-06 | Teacher risk outputs are interpretable and scoped to a course. |
-| CP-07 | ProcBot runs cheap checks more frequently than expensive checks. |
+| CP-07 | ProcBot uses lightweight in-browser detectors at each required cadence. |
 

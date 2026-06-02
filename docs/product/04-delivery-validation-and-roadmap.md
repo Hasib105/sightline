@@ -77,8 +77,8 @@ Build the smallest complete product first:
 
 - ProcBot activates when a student opens a BLC quiz.
 - Tab switch is detected in realtime.
-- FaceGone and MultiPerson checks run every 5 seconds.
-- Phone detection runs every 15-20 seconds.
+- FaceGone and MultiPerson checks run every 1 second.
+- Phone detection runs every 1 second.
 - Anomalies create WebSocket events to FastAPI and dashboard alerts with evidence screenshots.
 
 **Acceptance gate**
@@ -97,8 +97,8 @@ Build the smallest complete product first:
 - Invigilator confirms, dismisses, or marks the alert for follow-up.
 - Teacher views at-risk students for a course.
 - ProcBot TabSwitch event appears in realtime.
-- ProcBot FaceGone and MultiPerson checks run every 5 seconds.
-- ProcBot Phone checks run every 15-20 seconds.
+- ProcBot FaceGone and MultiPerson checks run every 1 second.
+- ProcBot Phone checks run every 1 second.
 
 ## 4) Correctness Checks
 
@@ -111,7 +111,7 @@ Build the smallest complete product first:
 | VC-05 | Alert evidence remains linked after review actions. |
 | VC-06 | Risk output is scoped to a course and remains interpretable. |
 | VC-07 | ProcBot uses realtime checks only for TabSwitch. |
-| VC-08 | ProcBot runs phone detection less frequently than face detection. |
+| VC-08 | ProcBot runs phone detection every 1 second. |
 
 ## 5) What The MVP Is Not
 

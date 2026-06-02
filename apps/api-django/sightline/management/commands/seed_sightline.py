@@ -220,7 +220,7 @@ class Command(BaseCommand):
                 "kind": "single_choice",
                 "prompt": "Which monitoring cadence does this ProcBot demo use?",
                 "options": [
-                    "Tab switch realtime, face every 5 seconds, phone every 17 seconds",
+                    "Tab switch realtime, face every 1 second, phone every 1 second",
                     "Everything runs every 1 second",
                     "Face and phone detection run only on submit",
                     "Manual instructor review only",
