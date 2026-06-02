@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, BookOpenCheck, ClipboardList, FileText, Loader2, MessageSquare, Plus, Send } from "lucide-react";
@@ -25,7 +25,7 @@ import {
   listCourseUnits,
   listEnrollments,
   listExams,
-  sendCourseChatMessage,
+  streamCourseChatMessage,
 } from "@/lib/dashboard-api";
 import type { CourseChatThread, CourseEnrollment, CourseMaterial, ExamSessionSummary } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -104,6 +104,10 @@ export default function CourseDetailsPage() {
   const [chatInput, setChatInput] = useState("");
   const [chatMessage, setChatMessage] = useState<string | null>(null);
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
+  const [streamedAnswer, setStreamedAnswer] = useState("");
+  const [chatStreamStatus, setChatStreamStatus] = useState("Searching course materials...");
+  const chatViewportRef = useRef<HTMLDivElement>(null);
 
   const loading = coursesQuery.isLoading || enrollmentsQuery.isLoading || examsQuery.isLoading;
   const error = coursesQuery.error ?? enrollmentsQuery.error ?? examsQuery.error;
@@ -180,11 +184,10 @@ export default function CourseDetailsPage() {
   });
 
   const askMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (question: string) => {
       if (!course) {
         throw new Error("Course is not loaded yet.");
       }
-      const question = chatInput.trim();
       if (!question) {
         throw new Error("Write a question first.");
       }
@@ -199,16 +202,55 @@ export default function CourseDetailsPage() {
         });
         setSelectedThreadId(thread.id);
       }
-      return sendCourseChatMessage(thread.id, question);
+      await streamCourseChatMessage(thread.id, question, {
+        onStatus: setChatStreamStatus,
+        onToken: (content) => {
+          setChatStreamStatus("Writing answer...");
+          setStreamedAnswer((current) => current + content);
+        },
+        onDone: () => setChatStreamStatus("Finishing response..."),
+      });
+      return thread.id;
     },
-    onSuccess: async (thread) => {
+    onMutate: (question) => {
       setChatInput("");
-      setSelectedThreadId(thread.id);
+      setPendingQuestion(question);
+      setStreamedAnswer("");
+      setChatStreamStatus("Searching course materials...");
+      setChatMessage(null);
+    },
+    onSuccess: async (threadId) => {
+      setSelectedThreadId(threadId);
       setChatMessage(null);
       await queryClient.invalidateQueries({ queryKey: ["course-chat-threads", courseId] });
+      setPendingQuestion(null);
+      setStreamedAnswer("");
     },
-    onError: (error) => setChatMessage(error instanceof Error ? error.message : "Unable to ask right now."),
+    onError: (error, question) => {
+      setPendingQuestion(null);
+      setStreamedAnswer("");
+      setChatInput((current) => current || question);
+      setChatMessage(error instanceof Error ? error.message : "Unable to ask right now.");
+    },
   });
+
+  const submitQuestion = () => {
+    const question = chatInput.trim();
+    if (question && !askMutation.isPending) {
+      askMutation.mutate(question);
+    }
+  };
+
+  useEffect(() => {
+    if (!chatDrawerOpen) {
+      return;
+    }
+    const viewport = chatViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
+  }, [chatDrawerOpen, pendingQuestion, selectedThread?.id, selectedThread?.messages.length, streamedAnswer]);
 
   return (
     <ConsolePage
@@ -246,7 +288,7 @@ export default function CourseDetailsPage() {
         />
       ) : (
         <>
-          <div className="grid gap-2 md:grid-cols-3">
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
             <ConsoleStat
               label="Enrollment"
               value={enrollmentStatValue}
@@ -461,7 +503,7 @@ export default function CourseDetailsPage() {
 
           <button
             type="button"
-            className="fixed bottom-5 right-5 z-30 flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--dashboard-accent)_38%,var(--dashboard-border))] bg-[var(--dashboard-accent)] px-4 py-3 text-sm font-semibold text-[var(--dashboard-accent-foreground)] shadow-2xl shadow-black/20 transition hover:translate-y-[-1px]"
+            className="fixed bottom-[calc(env(safe-area-inset-bottom)+1rem)] right-3 z-30 flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--dashboard-accent)_38%,var(--dashboard-border))] bg-[var(--dashboard-accent)] px-4 py-3 text-sm font-semibold text-[var(--dashboard-accent-foreground)] shadow-2xl shadow-black/20 transition hover:translate-y-[-1px] sm:bottom-5 sm:right-5"
             onClick={() => setChatDrawerOpen(true)}
           >
             <MessageSquare className="size-4" />
@@ -473,7 +515,7 @@ export default function CourseDetailsPage() {
             onOpenChange={setChatDrawerOpen}
             title="Course chat"
             description="Ask about the whole course or a single unit."
-            className="w-[min(30rem,calc(100vw-1rem))]"
+            className="w-full sm:w-[min(30rem,calc(100vw-1rem))]"
             bodyClassName="flex h-full min-h-0 flex-col gap-3"
           >
             <div className="grid gap-3">
@@ -512,17 +554,17 @@ export default function CourseDetailsPage() {
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            <div ref={chatViewportRef} className="min-h-0 flex-1 overflow-y-auto pr-1">
               {chatMessage ? <p className="mb-2 text-xs text-red-600">{chatMessage}</p> : null}
               {chatThreadsQuery.isLoading ? (
                 <div className="flex items-center justify-center p-6">
                   <Loader2 className="size-5 animate-spin text-muted-foreground" />
                 </div>
-              ) : !selectedThread || selectedThread.messages.length === 0 ? (
+              ) : (!selectedThread || selectedThread.messages.length === 0) && !pendingQuestion ? (
                 <ConsoleEmptyState title="No chat yet" description="Ask the first question about this content." icon={MessageSquare} />
               ) : (
                 <div className="space-y-2">
-                  {selectedThread.messages.map((message) => (
+                  {selectedThread?.messages.map((message) => (
                     <div
                       key={message.id}
                       className={`rounded-md border p-3 ${message.role === "user" ? "ml-8 border-[var(--dashboard-accent)] bg-[var(--dashboard-accent-soft)]" : "mr-8 border-(--dashboard-border) bg-(--dashboard-panel-muted)"}`}
@@ -538,24 +580,68 @@ export default function CourseDetailsPage() {
                       ) : null}
                     </div>
                   ))}
+                  {pendingQuestion ? (
+                    <>
+                      <div className="ml-8 rounded-md border border-[var(--dashboard-accent)] bg-[var(--dashboard-accent-soft)] p-3">
+                        <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                          You
+                        </div>
+                        <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">{pendingQuestion}</p>
+                      </div>
+                      <div className="mr-8 rounded-md border border-(--dashboard-border) bg-(--dashboard-panel-muted) p-3">
+                        <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                          Sightline chat
+                        </div>
+                        {streamedAnswer ? (
+                          <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">
+                            {streamedAnswer}
+                            <span className="ml-0.5 inline-block h-4 w-1 animate-pulse rounded-full bg-[var(--dashboard-accent)] align-middle" />
+                          </p>
+                        ) : (
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <Loader2 className="size-3.5 animate-spin" />
+                            {chatStreamStatus}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : null}
                 </div>
               )}
             </div>
 
-            <div className="border-t border-[var(--dashboard-border)] pt-3">
-              <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Question</label>
+            <form
+              className="border-t border-[var(--dashboard-border)] pt-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitQuestion();
+              }}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <label htmlFor="course-chat-question" className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  Question
+                </label>
+                <span className="text-[10px] text-muted-foreground">Enter to send · Shift + Enter for newline</span>
+              </div>
               <div className="mt-2 flex gap-2">
                 <textarea
-                  className={`${consoleTextareaClass} min-h-16 flex-1`}
+                  id="course-chat-question"
+                  className={`${consoleTextareaClass} min-h-16 flex-1 resize-none`}
                   value={chatInput}
                   onChange={(event) => setChatInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                      event.preventDefault();
+                      submitQuestion();
+                    }
+                  }}
                   placeholder="Ask about this unit..."
                 />
-                <Button size="icon" onClick={() => askMutation.mutate()} disabled={askMutation.isPending} aria-label="Ask question">
+                <Button type="submit" size="icon-lg" disabled={askMutation.isPending || !chatInput.trim()} aria-label="Ask question">
                   {askMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
                 </Button>
               </div>
-            </div>
+            </form>
           </InspectorDrawer>
         </>
       )}

@@ -9,6 +9,7 @@ from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
+from langchain_core.messages import AIMessageChunk
 
 from .exam_detection.config import CFG
 from .course_rag import retrieve_course_context
@@ -227,6 +228,100 @@ class SightlineApiSmokeTests(TestCase):
         self.assertEqual(message_response.status_code, 201)
         self.assertEqual(CourseChatMessage.objects.filter(thread_id=thread_response.json()["id"]).count(), 2)
 
+    @patch.dict(os.environ, {"GROQ_API_KEY": ""})
+    def test_course_chat_stream_emits_fallback_tokens_and_persists_messages(self):
+        self.assertTrue(self.client.login(username="student", password="sightline"))
+        course = Course.objects.get(code="CSE-321")
+        thread_response = self.client.post(
+            "/api/v1/course-chat-threads",
+            data={"course": course.id, "title": "Streamed fallback help"},
+            content_type="application/json",
+        )
+        thread_id = thread_response.json()["id"]
+
+        response = self.client.post(
+            f"/api/v1/course-chat-threads/{thread_id}/stream",
+            data={"message": "What should I review?"},
+            content_type="application/json",
+        )
+        body = b"".join(response.streaming_content).decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/event-stream")
+        self.assertIn("event: status", body)
+        self.assertIn("event: token", body)
+        self.assertIn("event: done", body)
+        self.assertEqual(CourseChatMessage.objects.filter(thread_id=thread_id).count(), 2)
+
+    @patch.dict(os.environ, {"GROQ_API_KEY": ""})
+    def test_course_chat_answers_unit_count_and_contents_without_indexed_search(self):
+        self.assertTrue(self.client.login(username="student", password="sightline"))
+        course = Course.objects.get(code="CSE-321")
+        units = list(CourseUnit.objects.filter(course=course).order_by("order"))
+        thread_response = self.client.post(
+            "/api/v1/course-chat-threads",
+            data={"course": course.id, "title": "Course outline help"},
+            content_type="application/json",
+        )
+
+        response = self.client.post(
+            f"/api/v1/course-chat-threads/{thread_response.json()['id']}/messages",
+            data={"message": "How many chapters are there and what does each unit contain?"},
+            content_type="application/json",
+        )
+        answer = response.json()["messages"][-1]["content"]
+
+        self.assertEqual(response.status_code, 201)
+        self.assertIn(f"Total units/chapters: {len(units)}", answer)
+        for unit in units:
+            self.assertIn(f"Unit {unit.order}: {unit.title}", answer)
+
+    @patch.dict(os.environ, {"GROQ_API_KEY": "test-groq-key", "GROQ_CHAT_MODEL": "test-groq-model"})
+    @patch("sightline.course_rag.course_chat_checkpointer")
+    @patch("sightline.course_rag.create_agent")
+    @patch("sightline.course_rag.ChatGroq")
+    def test_course_chat_stream_emits_agent_tokens(self, chat_groq, create_agent_mock, checkpointer):
+        checkpointer.return_value = nullcontext("test-checkpointer")
+        create_agent_mock.return_value.stream.return_value = [
+            {"type": "messages", "data": (AIMessageChunk(content="A streamed "), {})},
+            {"type": "messages", "data": (AIMessageChunk(content="answer."), {})},
+        ]
+        self.assertTrue(self.client.login(username="student", password="sightline"))
+        course = Course.objects.get(code="CSE-321")
+        thread_response = self.client.post(
+            "/api/v1/course-chat-threads",
+            data={"course": course.id, "title": "Groq stream help"},
+            content_type="application/json",
+        )
+        thread_id = thread_response.json()["id"]
+
+        response = self.client.post(
+            f"/api/v1/course-chat-threads/{thread_id}/stream",
+            data={"message": "What should I review?"},
+            content_type="application/json",
+        )
+        body = b"".join(response.streaming_content).decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('data: {"content": "A streamed "}', body)
+        self.assertIn('data: {"content": "answer."}', body)
+        self.assertEqual(
+            CourseChatMessage.objects.filter(thread_id=thread_id, role=CourseChatMessage.ROLE_ASSISTANT).get().content,
+            "A streamed answer.",
+        )
+        create_agent_mock.return_value.stream.assert_called_once_with(
+            {"messages": [{"role": "user", "content": "What should I review?"}]},
+            config={"configurable": {"thread_id": CourseChatThread.objects.get(id=thread_id).checkpoint_thread_id}},
+            stream_mode="messages",
+            version="v2",
+        )
+        chat_groq.assert_called_once_with(
+            api_key="test-groq-key",
+            model="test-groq-model",
+            temperature=0.2,
+            max_tokens=700,
+        )
+
     @patch.dict(os.environ, {"GROQ_API_KEY": "test-groq-key", "GROQ_CHAT_MODEL": "test-groq-model"})
     @patch("sightline.course_rag.course_chat_checkpointer")
     @patch("sightline.course_rag.create_agent")
@@ -260,7 +355,11 @@ class SightlineApiSmokeTests(TestCase):
         )
         agent_kwargs = create_agent_mock.call_args.kwargs
         self.assertEqual(agent_kwargs["checkpointer"], "test-checkpointer")
-        self.assertEqual(len(agent_kwargs["tools"]), 1)
+        self.assertEqual(
+            {tool.name for tool in agent_kwargs["tools"]},
+            {"retrieve_course_outline", "retrieve_course_materials"},
+        )
+        self.assertIn("General knowledge:", agent_kwargs["system_prompt"])
         thread = CourseChatThread.objects.get(id=thread_response.json()["id"])
         self.assertEqual(
             create_agent_mock.return_value.invoke.call_args.kwargs["config"],

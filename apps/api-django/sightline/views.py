@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 from uuid import uuid4
 
@@ -43,9 +44,12 @@ from .models import (
     StudentRiskScore,
     UserProfile,
 )
-from .course_rag import answer_course_question, index_course, remove_material_index
+from .course_rag import answer_course_question, index_course, remove_material_index, stream_course_question_events
 from .services import agenda_for_student, calculate_risk_run, generate_due_notifications
 from .tasks import queue_course_material_index
+
+
+logger = logging.getLogger(__name__)
 
 
 def django_user(request):
@@ -90,6 +94,27 @@ def _exam_video_live_stream_response(video):
         content_type="multipart/x-mixed-replace; boundary=frame",
     )
     response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response["X-Accel-Buffering"] = "no"
+    return response
+
+
+def _sse_event(event):
+    event_name = event.get("event", "message")
+    payload = {key: value for key, value in event.items() if key != "event"}
+    return f"event: {event_name}\ndata: {json.dumps(payload)}\n\n"
+
+
+def _course_chat_stream_response(thread, question):
+    def generate_events():
+        try:
+            for event in stream_course_question_events(thread, question):
+                yield _sse_event(event)
+        except Exception:
+            logger.exception("Course chat streaming failed.")
+            yield _sse_event({"event": "error", "detail": "Unable to answer right now."})
+
+    response = StreamingHttpResponse(generate_events(), content_type="text/event-stream")
+    response["Cache-Control"] = "no-cache, no-transform"
     response["X-Accel-Buffering"] = "no"
     return response
 
@@ -481,6 +506,11 @@ class ApiV1DispatchView(SessionlessAPIView):
                 return Response({"detail": "Not authorized to access this chat thread."}, status=status.HTTP_403_FORBIDDEN)
             if len(parts) == 2 and request.method == "GET":
                 return Response(serializers.CourseChatThreadSerializer(thread).data)
+            if len(parts) == 3 and parts[2] == "stream" and request.method == "POST":
+                question = (request.data.get("message") or request.data.get("content") or "").strip()
+                if not question:
+                    return Response({"detail": "Message is required."}, status=status.HTTP_400_BAD_REQUEST)
+                return _course_chat_stream_response(thread, question)
             if len(parts) == 3 and parts[2] == "messages" and request.method == "POST":
                 question = (request.data.get("message") or request.data.get("content") or "").strip()
                 if not question:

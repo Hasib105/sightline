@@ -728,6 +728,81 @@ export async function sendCourseChatMessage(
   return parseResponse<CourseChatThread>(response);
 }
 
+type CourseChatStreamEvent = {
+  message?: string;
+  content?: string;
+  detail?: string;
+  message_id?: number;
+  citations?: Array<Record<string, JsonValue>>;
+};
+
+export async function streamCourseChatMessage(
+  threadId: number,
+  message: string,
+  handlers: {
+    onStatus?: (message: string) => void;
+    onToken?: (content: string) => void;
+    onDone?: (event: CourseChatStreamEvent) => void;
+  } = {}
+): Promise<void> {
+  const response = await apiFetchClient(`/api/v1/course-chat-threads/${threadId}/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+  if (!response.ok) {
+    await parseResponse<never>(response);
+  }
+  if (!response.body) {
+    throw new ApiError("Streaming response is unavailable.", response.status);
+  }
+
+  const dispatch = (block: string) => {
+    const lines = block.split("\n");
+    const eventName = lines.find((line) => line.startsWith("event:"))?.slice(6).trim() || "message";
+    const data = lines
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n");
+    const payload = (data ? JSON.parse(data) : {}) as CourseChatStreamEvent;
+
+    if (eventName === "status" && payload.message) {
+      handlers.onStatus?.(payload.message);
+    } else if (eventName === "token" && payload.content) {
+      handlers.onToken?.(payload.content);
+    } else if (eventName === "done") {
+      handlers.onDone?.(payload);
+    } else if (eventName === "error") {
+      throw new ApiError(payload.detail || "Unable to answer right now.", response.status);
+    }
+  };
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, "\n");
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary >= 0) {
+      const block = buffer.slice(0, boundary).trim();
+      buffer = buffer.slice(boundary + 2);
+      if (block) {
+        dispatch(block);
+      }
+      boundary = buffer.indexOf("\n\n");
+    }
+    if (done) {
+      break;
+    }
+  }
+
+  if (buffer.trim()) {
+    dispatch(buffer.trim());
+  }
+}
+
 export async function listEnrollments(): Promise<CourseEnrollment[]> {
   const response = await apiFetchClient("/api/v1/enrollments");
   return parseResponse<CourseEnrollment[]>(response);

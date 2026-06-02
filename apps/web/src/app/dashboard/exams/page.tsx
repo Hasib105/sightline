@@ -4,13 +4,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Activity,
   AlertTriangle,
   Camera,
   CheckCircle2,
   ClipboardList,
+  Eye,
   Loader2,
+  Monitor,
   PlayCircle,
   Send,
+  ShieldCheck,
+  Smartphone,
 } from "lucide-react";
 
 import {
@@ -674,7 +679,7 @@ export default function StudentExamsPage() {
         </>
       }
     >
-      <div className="grid gap-2 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
         <ConsoleStat label="Timer" value={formatTime(secondsLeft)} description="Current attempt duration" />
         <ConsoleStat label="Answered" value={`${answeredCount} / 4`} description="Quiz response count" />
         <ConsoleStat label="ProcBot" value={procStatus} description="Browser monitor state" />
@@ -842,33 +847,76 @@ export default function StudentExamsPage() {
             <ConsolePanel
               title={
                 <span className="flex items-center gap-2">
-                  <Camera className="size-4 text-muted-foreground" />
+                  <ShieldCheck className="size-4 text-[var(--dashboard-accent)]" />
                   ProcBot dashboard
                 </span>
               }
-              description="Browser-only monitor for this attempt."
+              description="Live browser monitor for this attempt."
               contentClassName="space-y-3"
             >
-              <div className="relative aspect-[16/10] overflow-hidden rounded-md border border-slate-800 bg-slate-950">
-                <video ref={webcamRef} autoPlay muted playsInline className="absolute inset-0 h-full w-full scale-x-[-1] object-cover" />
-                <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
-                {!examStarted ? (
-                  <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-300">
-                    Camera activates after start
+              <div className="overflow-hidden rounded-lg border border-[var(--dashboard-border)] bg-[var(--dashboard-panel-muted)]">
+                <div className="flex items-center justify-between gap-3 border-b border-[var(--dashboard-border)] px-3 py-2.5">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="relative flex size-8 shrink-0 items-center justify-center rounded-full bg-[var(--dashboard-accent-soft)] text-[var(--dashboard-accent)]">
+                      <ShieldCheck className="size-4" />
+                      {examStarted ? <span className="absolute right-0 top-0 size-2.5 rounded-full border-2 border-[var(--dashboard-panel-muted)] bg-emerald-500" /> : null}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-semibold text-foreground">Secure session monitor</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {isConnecting ? "Connecting detectors..." : examStarted ? "Protection is running" : "Ready when the exam starts"}
+                      </p>
+                    </div>
                   </div>
-                ) : null}
+                  <StatusBadge
+                    label={isConnecting ? "connecting" : examStarted ? "active" : activationError ? "blocked" : "standby"}
+                    tone={examStarted ? "success" : isConnecting ? "warning" : activationError ? "danger" : "muted"}
+                  />
+                </div>
+
+                <div className="relative aspect-[16/10] overflow-hidden bg-slate-950">
+                  <video ref={webcamRef} autoPlay muted playsInline className="absolute inset-0 h-full w-full scale-x-[-1] object-cover" />
+                  <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
+                  <div className="absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-slate-950/80 to-transparent p-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-100">
+                    <span className="flex items-center gap-1.5">
+                      <Camera className="size-3" />
+                      Webcam
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className={`size-1.5 rounded-full ${examStarted ? "bg-emerald-400" : "bg-slate-400"}`} />
+                      {examStarted ? "Live" : "Standby"}
+                    </span>
+                  </div>
+                  {!examStarted ? (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-300">
+                      <span className="flex size-11 items-center justify-center rounded-full border border-slate-700 bg-slate-900/80">
+                        <ShieldCheck className="size-5" />
+                      </span>
+                      <span className="text-xs font-medium">Camera activates after start</span>
+                    </div>
+                  ) : null}
+                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-slate-950/90 to-transparent px-2.5 py-2 text-[10px] text-slate-200">
+                    <span>Tab: {tabMetric}</span>
+                    <span>{formatTime(secondsLeft)}</span>
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 {[
-                  ["Faces", faceMetric],
-                  ["Phone seen", phoneMetric],
-                  ["Tab state", tabMetric],
-                  ["Events", events.length.toString()],
-                ].map(([label, value]) => (
-                  <div key={label} className="rounded-md border border-[var(--dashboard-border)] bg-[var(--dashboard-panel-muted)] p-2">
-                    <div className="text-base font-semibold text-foreground">{value}</div>
-                    <div className="text-[11px] text-muted-foreground">{label}</div>
+                  { label: "Faces", value: faceMetric, icon: Eye },
+                  { label: "Phone seen", value: phoneMetric, icon: Smartphone },
+                  { label: "Tab state", value: tabMetric, icon: Monitor },
+                  { label: "Events", value: events.length.toString(), icon: Activity },
+                ].map(({ label, value, icon: Icon }) => (
+                  <div key={label} className="rounded-md border border-[var(--dashboard-border)] bg-[var(--dashboard-panel-muted)] p-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-base font-semibold text-foreground">{value}</div>
+                        <div className="text-[11px] text-muted-foreground">{label}</div>
+                      </div>
+                      <Icon className="size-3.5 text-[var(--dashboard-accent)]" />
+                    </div>
                   </div>
                 ))}
               </div>

@@ -133,7 +133,7 @@ export function ConsolePanel({
     >
       {title || description || actions ? (
         <CardHeader className="border-b border-[var(--dashboard-border)] bg-[var(--dashboard-panel-muted)] px-3 py-2.5">
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-0.5">
               {title ? (
                 <CardTitle className="text-[13px] font-semibold text-foreground">

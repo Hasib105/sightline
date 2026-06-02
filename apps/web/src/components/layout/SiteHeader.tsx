@@ -214,35 +214,43 @@ export function SiteHeader() {
 
       <div className="relative z-30 mx-auto flex h-[52px] w-full items-center justify-between md:hidden">
         <SightlineMark className="h-12 w-12" />
-        <button
-          type="button"
-          aria-label={open ? "Close menu" : "Open menu"}
-          aria-expanded={open}
-          onClick={() => setOpen((current) => !current)}
-          className={cn(
-            "relative inline-flex h-11 w-11 items-center justify-center rounded-full border border-border-subtle bg-surface/85 shadow-card backdrop-blur-md transition-[border-color,box-shadow,transform] duration-300",
-            open && "border-brand-1/40 shadow-pill",
-          )}
-        >
-          <span
+        <div className="flex items-center gap-2">
+          <Link
+            href="/login"
+            className="inline-flex h-10 items-center rounded-full border border-border-subtle bg-surface/90 px-4 text-sm font-semibold text-foreground shadow-card backdrop-blur-md transition-colors hover:border-brand-1/40 hover:text-brand-2"
+          >
+            Sign in
+          </Link>
+          <button
+            type="button"
+            aria-label={open ? "Close menu" : "Open menu"}
+            aria-expanded={open}
+            onClick={() => setOpen((current) => !current)}
             className={cn(
-              "absolute h-0.5 w-4 rounded-full bg-foreground transition-transform duration-300",
-              open ? "translate-y-0 rotate-45" : "-translate-y-1.5",
+              "relative inline-flex h-11 w-11 items-center justify-center rounded-full border border-border-subtle bg-surface/85 shadow-card backdrop-blur-md transition-[border-color,box-shadow,transform] duration-300",
+              open && "border-brand-1/40 shadow-pill",
             )}
-          />
-          <span
-            className={cn(
-              "absolute h-0.5 w-4 rounded-full bg-foreground transition-opacity duration-200",
-              open ? "opacity-0" : "opacity-100",
-            )}
-          />
-          <span
-            className={cn(
-              "absolute h-0.5 w-4 rounded-full bg-foreground transition-transform duration-300",
-              open ? "translate-y-0 -rotate-45" : "translate-y-1.5",
-            )}
-          />
-        </button>
+          >
+            <span
+              className={cn(
+                "absolute h-0.5 w-4 rounded-full bg-foreground transition-transform duration-300",
+                open ? "translate-y-0 rotate-45" : "-translate-y-1.5",
+              )}
+            />
+            <span
+              className={cn(
+                "absolute h-0.5 w-4 rounded-full bg-foreground transition-opacity duration-200",
+                open ? "opacity-0" : "opacity-100",
+              )}
+            />
+            <span
+              className={cn(
+                "absolute h-0.5 w-4 rounded-full bg-foreground transition-transform duration-300",
+                open ? "translate-y-0 -rotate-45" : "translate-y-1.5",
+              )}
+            />
+          </button>
+        </div>
       </div>
 
       <div

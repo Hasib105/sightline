@@ -66,7 +66,7 @@ export function StudentDashboard({ user }: { user: CurrentUser }) {
         </>
       }
     >
-      <div className="grid gap-2 md:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
         <ConsoleStat label="Enrolled courses" value={activeEnrollments.length} description="Active course enrollments" />
         <ConsoleStat label="Available exams" value={exams.length} description="From enrolled courses" />
         <ConsoleStat label="Submitted" value={submittedExamIds.size} description="Completed attempts" />

@@ -555,11 +555,22 @@
     --tw-ring-color: color-mix(in oklab, var(--dashboard-accent) 24%, transparent) !important;
   }
   @media (max-width: 767px) {
+    :root {
+      --density-dashboard-content-px: 0.75rem;
+      --density-dashboard-content-py: 0.75rem;
+      --density-dashboard-content-pr: 0.75rem;
+    }
+
     .dashboard-command-trigger {
       width: 2rem;
       min-width: 2rem;
       justify-content: center;
       padding: 0;
+    }
+
+    .dashboard-sheet {
+      width: 100vw;
+      max-width: 100vw;
     }
   }
 }

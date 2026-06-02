@@ -27,7 +27,7 @@ async function proxyDjangoApi(request: NextRequest, context: RouteContext) {
   responseHeaders.delete("content-encoding");
   responseHeaders.delete("content-length");
 
-  return new NextResponse(await upstream.text(), {
+  return new NextResponse(upstream.body, {
     status: upstream.status,
     headers: responseHeaders,
   });
