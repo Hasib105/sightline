@@ -195,11 +195,10 @@ export default function InvigilatorResultPage() {
             <ConsoleStat label="Model" value={(video.result?.model_name ?? stringValue(video.analysis_report.model)) || "Pending"} description="Detector used for analysis" />
           </div>
 
-          <div className="grid gap-2 md:grid-cols-5">
+          <div className="grid gap-2 md:grid-cols-4">
             <ConsoleStat label="Total" value={totalAlertCount(video, alerts.length)} description="All detected alerts" />
             <ConsoleStat label="Phone" value={alertCount(video, "phone")} description="Device evidence" />
             <ConsoleStat label="Talking" value={alertCount(video, "talking")} description="Mouth movement evidence" />
-            <ConsoleStat label="Paper sharing" value={alertCount(video, "paper-sharing")} description="Neighbor handoff evidence" />
             <ConsoleStat label="Look-away" value={alertCount(video, "look-away")} description="Repeated head turn evidence" />
           </div>
 

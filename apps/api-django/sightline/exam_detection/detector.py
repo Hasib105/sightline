@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from ultralytics import YOLO
 
 from .config import CFG
 
@@ -44,8 +43,8 @@ class Detector:
         self.model_size = CFG._clean_model_size(model_size)
         self.pose_model = None
         self.det_model = None
-        self.pose_model = YOLO(CFG.pose_model_name(self.model_size))
-        self.det_model = YOLO(CFG.det_model_name(self.model_size))
+        self.pose_model = _load_yolo(CFG.pose_model_name(self.model_size))
+        self.det_model = _load_yolo(CFG.det_model_name(self.model_size))
         self.face_mesh_error: str | None = None
         self.face_mesh = self._build_face_mesh(max_num_faces=12, static_image_mode=False)
         self.crop_face_mesh = self._build_face_mesh(max_num_faces=1, static_image_mode=True)
@@ -156,6 +155,9 @@ class Detector:
                     continue
 
                 candidate_box = (x1, y1, x2, y2)
+                keypoints = _extract_keypoints(result, idx)
+                if CFG.SEATED_STUDENTS_ONLY and _is_standing_person(candidate_box, keypoints):
+                    continue
                 if any(_iou(candidate_box, p.box) > CFG.IOU_DUPLICATE_THRESHOLD for p in persons):
                     continue
 
@@ -164,7 +166,7 @@ class Detector:
                     Person(
                         id=_track_id(box, idx + 1),
                         box=candidate_box,
-                        kpts=_extract_keypoints(result, idx),
+                        kpts=keypoints,
                         confidence=confidence,
                     )
                 )
@@ -184,6 +186,12 @@ class Detector:
                     )
                 )
         return phones
+
+
+def _load_yolo(model_name: str) -> Any:
+    from ultralytics import YOLO
+
+    return YOLO(model_name)
 
 
 def _track_id(box: Any, fallback_index: int) -> int | str:
@@ -213,6 +221,50 @@ def _extract_keypoints(result: Any, idx: int) -> np.ndarray | None:
         return np.column_stack([xy, conf.reshape(-1, 1)])
     except Exception:
         return None
+
+
+def _is_standing_person(box: tuple[int, int, int, int], keypoints: np.ndarray | None) -> bool:
+    x1, y1, x2, y2 = box
+    box_w = max(1, x2 - x1)
+    box_h = max(1, y2 - y1)
+    aspect_ratio = box_h / box_w
+    if aspect_ratio < CFG.STANDING_BOX_ASPECT_RATIO:
+        return False
+
+    if keypoints is None:
+        return True
+
+    shoulders = _visible_pose_points(keypoints, (5, 6), CFG.STANDING_KP_CONF)
+    hips = _visible_pose_points(keypoints, (11, 12), CFG.STANDING_KP_CONF)
+    lower_leg_points = _visible_pose_points(keypoints, (13, 14, 15, 16), CFG.STANDING_KP_CONF)
+    if len(lower_leg_points) < CFG.STANDING_MIN_LEG_KEYPOINTS:
+        return False
+
+    hip_y = _average_y(hips) if hips else y1 + box_h * 0.48
+    shoulder_y = _average_y(shoulders) if shoulders else y1 + box_h * 0.22
+    lowest_leg_y = max(point[1] for point in lower_leg_points)
+    lower_body_ratio = max(0.0, lowest_leg_y - hip_y) / box_h
+    upright_body_order = shoulder_y < hip_y < lowest_leg_y
+    return upright_body_order and lower_body_ratio >= CFG.STANDING_MIN_LOWER_BODY_RATIO
+
+
+def _visible_pose_points(
+    keypoints: np.ndarray,
+    indexes: tuple[int, ...],
+    threshold: float,
+) -> list[tuple[float, float]]:
+    points: list[tuple[float, float]] = []
+    for index in indexes:
+        try:
+            if index < len(keypoints) and float(keypoints[index, 2]) >= threshold:
+                points.append((float(keypoints[index, 0]), float(keypoints[index, 1])))
+        except Exception:
+            continue
+    return points
+
+
+def _average_y(points: list[tuple[float, float]]) -> float:
+    return sum(point[1] for point in points) / max(len(points), 1)
 
 
 def _head_crop_bounds(person: Person, frame_shape: tuple[int, ...]) -> tuple[int, int, int, int] | None:

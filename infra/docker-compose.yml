@@ -63,7 +63,7 @@ services:
       SIGHTLINE_COLLECTSTATIC: "0"
       SIGHTLINE_ANALYSIS_THREAD_FALLBACK: "0"
       EXAM_AI_ANALYSIS_FPS: "2.0"
-      EXAM_AI_MODEL_SIZE: n
+      EXAM_AI_MODEL_SIZE: s
     depends_on:
       db:
         condition: service_healthy

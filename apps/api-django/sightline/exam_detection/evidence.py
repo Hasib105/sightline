@@ -55,7 +55,9 @@ def draw_evidence_frame(
     highlight_id = highlight.student_id if highlight is not None else None
 
     for row in rows:
-        active = row.talking or row.sharing or row.phone or row.pose != "Forward"
+        # Paper-sharing detection is disabled for now.
+        # active = row.talking or row.sharing or row.phone or row.pose != "Forward"
+        active = row.talking or row.phone or row.pose != "Forward"
         color = (34, 197, 94)
         if row.pose != "Forward":
             color = (245, 158, 11)
@@ -72,8 +74,8 @@ def draw_evidence_frame(
             tags.append("PHONE")
         if row.talking:
             tags.append("TALK")
-        if row.sharing:
-            tags.append("SHARE")
+        # if row.sharing:
+        #     tags.append("SHARE")
         label = f"ID {row.id} | {row.pose}"
         if tags:
             label += " | " + ",".join(tags)

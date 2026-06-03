@@ -23,9 +23,21 @@ class CFG:
     DET_CONF = 0.35
     KP_CONF = 0.25
     GESTURE_KP_CONF = 0.12
-    SHARE_KP_CONF = 0.28
+    # Paper-sharing detection is disabled for now. Keep these settings here so
+    # the feature can be restored without rebuilding the thresholds from memory.
+    # SHARE_KP_CONF = 0.28
     MIN_AREA_RATIO = 0.001
     IOU_DUPLICATE_THRESHOLD = 0.50
+    SEATED_STUDENTS_ONLY = os.getenv("EXAM_AI_SEATED_STUDENTS_ONLY", "true").lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    STANDING_BOX_ASPECT_RATIO = float(os.getenv("EXAM_AI_STANDING_BOX_ASPECT_RATIO", "2.45"))
+    STANDING_KP_CONF = float(os.getenv("EXAM_AI_STANDING_KP_CONF", "0.20"))
+    STANDING_MIN_LEG_KEYPOINTS = int(os.getenv("EXAM_AI_STANDING_MIN_LEG_KEYPOINTS", "3"))
+    STANDING_MIN_LOWER_BODY_RATIO = float(os.getenv("EXAM_AI_STANDING_MIN_LOWER_BODY_RATIO", "0.32"))
 
     YAW_THRESH = 0.30
     FACE_TOWARD_THRESH = 0.25
@@ -40,11 +52,12 @@ class CFG:
     TALK_MIN_EVENTS = 3
     ALLOW_POSE_MOUTH_FALLBACK = False
 
-    WRIST_EXTEND_FRAC = 0.45
-    SHARE_SCORE_THRESHOLD = 5.0
-    SHARE_MIN_EVENTS = 3
-    SHARE_TARGET_MAX_DISTANCE_PX = 120
+    # WRIST_EXTEND_FRAC = 0.45
+    # SHARE_SCORE_THRESHOLD = 5.0
+    # SHARE_MIN_EVENTS = 3
+    # SHARE_TARGET_MAX_DISTANCE_PX = 120
     NEIGHBOR_MAX_DISTANCE_PX = 360
+    PHONE_ASSIGN_MAX_DISTANCE_PX = 180
 
     WINDOW_SECONDS = 45.0
     COOLDOWN_SECONDS = 10.0

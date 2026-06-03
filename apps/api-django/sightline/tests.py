@@ -516,6 +516,46 @@ class SightlineApiSmokeTests(TestCase):
         self.assertTrue(CFG.det_model_name().endswith("yolov8s.pt"))
         self.assertTrue(CFG.pose_model_name().endswith("yolov8s-pose.pt"))
 
+    def test_yolo_standing_people_are_not_student_candidates(self):
+        import numpy as np
+
+        from .exam_detection.detector import _is_standing_person
+
+        standing_keypoints = np.zeros((17, 3), dtype=float)
+        for index, x, y in (
+            (5, 120, 110),
+            (6, 170, 110),
+            (11, 125, 210),
+            (12, 165, 210),
+            (13, 126, 300),
+            (14, 164, 300),
+            (15, 128, 390),
+            (16, 162, 390),
+        ):
+            standing_keypoints[index] = [x, y, 0.95]
+
+        seated_keypoints = np.zeros((17, 3), dtype=float)
+        for index, x, y in (
+            (5, 120, 110),
+            (6, 170, 110),
+            (11, 125, 190),
+            (12, 165, 190),
+        ):
+            seated_keypoints[index] = [x, y, 0.95]
+
+        self.assertTrue(_is_standing_person((100, 70, 190, 410), standing_keypoints))
+        self.assertFalse(_is_standing_person((100, 70, 230, 300), seated_keypoints))
+
+    def test_phone_assignment_ignores_far_phone_without_seated_row_overlap(self):
+        from .exam_detection.behavior_engine import StudentRow, nearest_row_to_box
+
+        rows = [
+            StudentRow(id="A1", box=(90, 90, 210, 260), pose="Forward", yaw=0.0),
+        ]
+
+        self.assertEqual(nearest_row_to_box((130, 150, 155, 185), rows).id, "A1")
+        self.assertIsNone(nearest_row_to_box((520, 80, 560, 130), rows))
+
     def test_exam_video_analysis_queue_uses_celery(self):
         from . import tasks
 

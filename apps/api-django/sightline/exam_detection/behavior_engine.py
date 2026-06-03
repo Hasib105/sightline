@@ -23,14 +23,15 @@ class StudentRow:
     nearest_id: int | str | None = None
     nearest_distance: float | None = None
     talk_reason: str | None = None
-    share_reason: str | None = None
-    share_target_id: int | str | None = None
     talking: bool = False
-    sharing: bool = False
     phone: bool = False
     look_score: float = 0.0
     talk_score: float = 0.0
-    share_score: float = 0.0
+    # Paper-sharing detection is disabled for now.
+    # share_reason: str | None = None
+    # share_target_id: int | str | None = None
+    # sharing: bool = False
+    # share_score: float = 0.0
     phone_score: float = 0.0
 
 
@@ -54,14 +55,17 @@ class Evaluation:
     messages: list[str]
 
 
-@dataclass
-class ShareObservation:
-    observed: bool = False
-    target_id: int | str | None = None
-    target_distance: float | None = None
-    reason: str | None = None
-    evidence: dict[str, Any] = field(default_factory=dict)
-
+# Paper-sharing detection is disabled for now, but kept here as commented
+# reference code so it can be restored without losing the original logic.
+#
+# @dataclass
+# class ShareObservation:
+#     observed: bool = False
+#     target_id: int | str | None = None
+#     target_distance: float | None = None
+#     reason: str | None = None
+#     evidence: dict[str, Any] = field(default_factory=dict)
+#
 
 class BehaviorEngine:
     def __init__(self) -> None:
@@ -69,7 +73,7 @@ class BehaviorEngine:
         self.mouth_hist: dict[int | str, list[tuple[float, float]]] = defaultdict(list)
         self.look_events = defaultdict(lambda: {"left": [], "right": []})
         self.talk_events: dict[int | str, list[float]] = defaultdict(list)
-        self.share_events: dict[int | str, list[float]] = defaultdict(list)
+        # self.share_events: dict[int | str, list[float]] = defaultdict(list)
         self.phone_events: dict[int | str, list[float]] = defaultdict(list)
         self.scores: dict[str, float] = defaultdict(float)
         self.last_alert: dict[str, float] = defaultdict(lambda: -10_000.0)
@@ -110,8 +114,8 @@ class BehaviorEngine:
             close_neighbor = nearest is not None and is_close_neighbor(person.box, nearest.box, nearest_dist)
             talking_observed = person.id in active_talkers
             talk_reason = "mouth-open" if talking_observed else None
-            share_observation = paper_share_observation(person, persons)
-            sharing_observed = share_observation.observed
+            # share_observation = paper_share_observation(person, persons)
+            # sharing_observed = share_observation.observed
 
             row = StudentRow(
                 id=person.id,
@@ -124,8 +128,8 @@ class BehaviorEngine:
                 nearest_id=nearest.id if nearest is not None else None,
                 nearest_distance=round(nearest_dist, 1) if nearest_dist is not None else None,
                 talk_reason=talk_reason,
-                share_reason=share_observation.reason,
-                share_target_id=share_observation.target_id,
+                # share_reason=share_observation.reason,
+                # share_target_id=share_observation.target_id,
             )
 
             self._score(f"{person.id}:look", pose != "Forward", inc=1.0)
@@ -189,33 +193,33 @@ class BehaviorEngine:
                     )
                 )
 
-            self._score(f"{person.id}:share", sharing_observed, inc=1.8)
-            row.share_score = self.scores[f"{person.id}:share"]
-            if sharing_observed:
-                self.share_events[person.id].append(seconds)
-            self.share_events[person.id] = prune_window(self.share_events[person.id], seconds)
-            share_count = len(self.share_events[person.id])
-            row.sharing = row.share_score >= CFG.SHARE_SCORE_THRESHOLD and share_count >= CFG.SHARE_MIN_EVENTS
-            if (
-                row.sharing
-                and self._cooldown_ready(person.id, "paper-sharing", seconds)
-            ):
-                alerts.append(
-                    AlertSignal(
-                        student_id=person.id,
-                        alert_type="paper-sharing",
-                        timestamp=timestamp,
-                        seconds=round(seconds, 2),
-                        detail=paper_share_detail(share_observation, share_count),
-                        count=share_count,
-                        confidence_score=round(row.share_score, 2),
-                        neighbor_id=share_observation.target_id or row.nearest_id,
-                        evidence={
-                            "nearest_distance": row.nearest_distance,
-                            **share_observation.evidence,
-                        },
-                    )
-                )
+            # self._score(f"{person.id}:share", sharing_observed, inc=1.8)
+            # row.share_score = self.scores[f"{person.id}:share"]
+            # if sharing_observed:
+            #     self.share_events[person.id].append(seconds)
+            # self.share_events[person.id] = prune_window(self.share_events[person.id], seconds)
+            # share_count = len(self.share_events[person.id])
+            # row.sharing = row.share_score >= CFG.SHARE_SCORE_THRESHOLD and share_count >= CFG.SHARE_MIN_EVENTS
+            # if (
+            #     row.sharing
+            #     and self._cooldown_ready(person.id, "paper-sharing", seconds)
+            # ):
+            #     alerts.append(
+            #         AlertSignal(
+            #             student_id=person.id,
+            #             alert_type="paper-sharing",
+            #             timestamp=timestamp,
+            #             seconds=round(seconds, 2),
+            #             detail=paper_share_detail(share_observation, share_count),
+            #             count=share_count,
+            #             confidence_score=round(row.share_score, 2),
+            #             neighbor_id=share_observation.target_id or row.nearest_id,
+            #             evidence={
+            #                 "nearest_distance": row.nearest_distance,
+            #                 **share_observation.evidence,
+            #             },
+            #         )
+            #     )
 
             rows.append(row)
 
@@ -468,128 +472,128 @@ def dominant_mouth_talkers(persons: list[Person], mouth_ratios: dict[int, float 
     return {student_id for student_id, _ in candidates[: CFG.MAX_TALKERS_PER_FRAME]}
 
 
-def paper_share_observation(person: Person, persons: list[Person]) -> ShareObservation:
-    keypoints = person.kpts
-    if keypoints is None or len(persons) < 2:
-        return ShareObservation()
-
-    _, y1, _, y2 = person.box
-    body_cx, _ = box_center(person.box)
-    body_w = box_width(person.box)
-    body_h = box_height(person.box)
-    left_shoulder = visible_keypoint(keypoints, 5, CFG.SHARE_KP_CONF)
-    right_shoulder = visible_keypoint(keypoints, 6, CFG.SHARE_KP_CONF)
-    if left_shoulder is None or right_shoulder is None:
-        return ShareObservation()
-
-    torso_left = min(left_shoulder[0], right_shoulder[0])
-    torso_right = max(left_shoulder[0], right_shoulder[0])
-    shoulder_w = max(torso_right - torso_left, body_w * 0.18, 1.0)
-    shoulder_y = (left_shoulder[1] + right_shoulder[1]) / 2.0
-    best: ShareObservation | None = None
-
-    for point_index, label in ((9, "left-wrist"), (10, "right-wrist")):
-        point = visible_keypoint(keypoints, point_index, CFG.SHARE_KP_CONF)
-        if point is None:
-            continue
-
-        px, py = point
-        if py < shoulder_y - body_h * 0.18 or py > y2 + body_h * 0.10:
-            continue
-
-        if px < body_cx:
-            direction = -1
-            extension = (torso_left - px) / shoulder_w
-        else:
-            direction = 1
-            extension = (px - torso_right) / shoulder_w
-        if extension < CFG.WRIST_EXTEND_FRAC:
-            continue
-
-        target = nearest_student_in_direction(person, persons, point, direction)
-        if target is None:
-            continue
-
-        target_distance = point_distance_to_box(point, target.box)
-        target_limit = max(CFG.SHARE_TARGET_MAX_DISTANCE_PX, body_w * 0.40, box_width(target.box) * 0.30)
-        if target_distance > target_limit:
-            continue
-
-        score = extension + max(0.0, target_limit - target_distance) / target_limit
-        observation = ShareObservation(
-            observed=True,
-            target_id=target.id,
-            target_distance=target_distance,
-            reason=f"{label}-extended",
-            evidence={
-                "share_reason": f"{label}-extended",
-                "target_distance": round(target_distance, 1),
-                "hand_extension": round(direction * extension, 3),
-            },
-        )
-        if best is None or score > float(best.evidence.get("score", -1.0)):
-            observation.evidence["score"] = round(score, 3)
-            best = observation
-
-    return best or ShareObservation()
-
-
-def paper_share_detail(observation: ShareObservation, count: int) -> str:
-    target = observation.target_id if observation.target_id is not None else "nearby student"
-    reason = observation.reason or "hand extended"
-    return f"{reason} toward student {target} ({count} confirmations)"
-
-
-def arm_extended_from_torso(
-    keypoints: np.ndarray,
-    point: tuple[float, float],
-    direction: int,
-    box: tuple[int, int, int, int],
-) -> bool:
-    px, _ = point
-    x1, _, x2, _ = box
-    body_w = box_width(box)
-    left_shoulder = visible_keypoint(keypoints, 5, CFG.GESTURE_KP_CONF)
-    right_shoulder = visible_keypoint(keypoints, 6, CFG.GESTURE_KP_CONF)
-    if left_shoulder is not None and right_shoulder is not None:
-        torso_left = min(left_shoulder[0], right_shoulder[0])
-        torso_right = max(left_shoulder[0], right_shoulder[0])
-        shoulder_w = max(torso_right - torso_left, body_w * 0.20)
-        if direction < 0:
-            return px <= torso_left - shoulder_w * 0.18
-        return px >= torso_right + shoulder_w * 0.18
-
-    if direction < 0:
-        return px <= x1 + body_w * 0.05
-    return px >= x2 - body_w * 0.05
-
-
-def visible_keypoint(keypoints: np.ndarray, index: int, threshold: float) -> tuple[float, float] | None:
-    try:
-        if index < len(keypoints) and float(keypoints[index, 2]) >= threshold:
-            return float(keypoints[index, 0]), float(keypoints[index, 1])
-    except Exception:
-        return None
-    return None
-
-
-def nearest_student_in_direction(
-    person: Person,
-    persons: list[Person],
-    point: tuple[float, float],
-    direction: int,
-) -> Person | None:
-    body_cx, _ = box_center(person.box)
-    candidates = [
-        other
-        for other in persons
-        if other.id != person.id and direction * (box_center(other.box)[0] - body_cx) > 0
-    ]
-    if not candidates:
-        return None
-    return min(candidates, key=lambda other: point_distance_to_box(point, other.box))
-
-
+# def paper_share_observation(person: Person, persons: list[Person]) -> ShareObservation:
+#     keypoints = person.kpts
+#     if keypoints is None or len(persons) < 2:
+#         return ShareObservation()
+#
+#     _, y1, _, y2 = person.box
+#     body_cx, _ = box_center(person.box)
+#     body_w = box_width(person.box)
+#     body_h = box_height(person.box)
+#     left_shoulder = visible_keypoint(keypoints, 5, CFG.SHARE_KP_CONF)
+#     right_shoulder = visible_keypoint(keypoints, 6, CFG.SHARE_KP_CONF)
+#     if left_shoulder is None or right_shoulder is None:
+#         return ShareObservation()
+#
+#     torso_left = min(left_shoulder[0], right_shoulder[0])
+#     torso_right = max(left_shoulder[0], right_shoulder[0])
+#     shoulder_w = max(torso_right - torso_left, body_w * 0.18, 1.0)
+#     shoulder_y = (left_shoulder[1] + right_shoulder[1]) / 2.0
+#     best: ShareObservation | None = None
+#
+#     for point_index, label in ((9, "left-wrist"), (10, "right-wrist")):
+#         point = visible_keypoint(keypoints, point_index, CFG.SHARE_KP_CONF)
+#         if point is None:
+#             continue
+#
+#         px, py = point
+#         if py < shoulder_y - body_h * 0.18 or py > y2 + body_h * 0.10:
+#             continue
+#
+#         if px < body_cx:
+#             direction = -1
+#             extension = (torso_left - px) / shoulder_w
+#         else:
+#             direction = 1
+#             extension = (px - torso_right) / shoulder_w
+#         if extension < CFG.WRIST_EXTEND_FRAC:
+#             continue
+#
+#         target = nearest_student_in_direction(person, persons, point, direction)
+#         if target is None:
+#             continue
+#
+#         target_distance = point_distance_to_box(point, target.box)
+#         target_limit = max(CFG.SHARE_TARGET_MAX_DISTANCE_PX, body_w * 0.40, box_width(target.box) * 0.30)
+#         if target_distance > target_limit:
+#             continue
+#
+#         score = extension + max(0.0, target_limit - target_distance) / target_limit
+#         observation = ShareObservation(
+#             observed=True,
+#             target_id=target.id,
+#             target_distance=target_distance,
+#             reason=f"{label}-extended",
+#             evidence={
+#                 "share_reason": f"{label}-extended",
+#                 "target_distance": round(target_distance, 1),
+#                 "hand_extension": round(direction * extension, 3),
+#             },
+#         )
+#         if best is None or score > float(best.evidence.get("score", -1.0)):
+#             observation.evidence["score"] = round(score, 3)
+#             best = observation
+#
+#     return best or ShareObservation()
+#
+#
+# def paper_share_detail(observation: ShareObservation, count: int) -> str:
+#     target = observation.target_id if observation.target_id is not None else "nearby student"
+#     reason = observation.reason or "hand extended"
+#     return f"{reason} toward student {target} ({count} confirmations)"
+#
+#
+# def arm_extended_from_torso(
+#     keypoints: np.ndarray,
+#     point: tuple[float, float],
+#     direction: int,
+#     box: tuple[int, int, int, int],
+# ) -> bool:
+#     px, _ = point
+#     x1, _, x2, _ = box
+#     body_w = box_width(box)
+#     left_shoulder = visible_keypoint(keypoints, 5, CFG.GESTURE_KP_CONF)
+#     right_shoulder = visible_keypoint(keypoints, 6, CFG.GESTURE_KP_CONF)
+#     if left_shoulder is not None and right_shoulder is not None:
+#         torso_left = min(left_shoulder[0], right_shoulder[0])
+#         torso_right = max(left_shoulder[0], right_shoulder[0])
+#         shoulder_w = max(torso_right - torso_left, body_w * 0.20)
+#         if direction < 0:
+#             return px <= torso_left - shoulder_w * 0.18
+#         return px >= torso_right + shoulder_w * 0.18
+#
+#     if direction < 0:
+#         return px <= x1 + body_w * 0.05
+#     return px >= x2 - body_w * 0.05
+#
+#
+# def visible_keypoint(keypoints: np.ndarray, index: int, threshold: float) -> tuple[float, float] | None:
+#     try:
+#         if index < len(keypoints) and float(keypoints[index, 2]) >= threshold:
+#             return float(keypoints[index, 0]), float(keypoints[index, 1])
+#     except Exception:
+#         return None
+#     return None
+#
+#
+# def nearest_student_in_direction(
+#     person: Person,
+#     persons: list[Person],
+#     point: tuple[float, float],
+#     direction: int,
+# ) -> Person | None:
+#     body_cx, _ = box_center(person.box)
+#     candidates = [
+#         other
+#         for other in persons
+#         if other.id != person.id and direction * (box_center(other.box)[0] - body_cx) > 0
+#     ]
+#     if not candidates:
+#         return None
+#     return min(candidates, key=lambda other: point_distance_to_box(point, other.box))
+#
+#
 def fallback_mouth_ratio_from_pose(keypoints: np.ndarray | None) -> float | None:
     if keypoints is None or len(keypoints) < 7:
         return None
@@ -643,41 +647,52 @@ def face_toward_neighbor(
     return pose == "Looking Left" and strong_turn
 
 
-def wrist_toward_neighbor(person: Person, neighbor: Person) -> bool:
-    keypoints = person.kpts
-    if keypoints is None:
-        return False
-
-    x1, y1, x2, y2 = person.box
-    body_cx, _ = box_center(person.box)
-    neighbor_cx, _ = box_center(neighbor.box)
-    direction = 1 if neighbor_cx > body_cx else -1
-    body_w = max(x2 - x1, 1)
-    torso_top = y1 + (y2 - y1) * 0.20
-    torso_bottom = y1 + (y2 - y1) * 0.92
-
-    for wrist_index in (9, 10):
-        if wrist_index >= len(keypoints) or float(keypoints[wrist_index, 2]) < CFG.KP_CONF:
-            continue
-        wrist_x = float(keypoints[wrist_index, 0])
-        wrist_y = float(keypoints[wrist_index, 1])
-        if not (torso_top <= wrist_y <= torso_bottom):
-            continue
-        extension = direction * (wrist_x - body_cx) / body_w
-        if extension < CFG.WRIST_EXTEND_FRAC:
-            continue
-        if point_distance_to_box((wrist_x, wrist_y), neighbor.box) < point_distance_to_box((wrist_x, wrist_y), person.box) + body_w:
-            return True
-    return False
-
-
+# def wrist_toward_neighbor(person: Person, neighbor: Person) -> bool:
+#     keypoints = person.kpts
+#     if keypoints is None:
+#         return False
+#
+#     x1, y1, x2, y2 = person.box
+#     body_cx, _ = box_center(person.box)
+#     neighbor_cx, _ = box_center(neighbor.box)
+#     direction = 1 if neighbor_cx > body_cx else -1
+#     body_w = max(x2 - x1, 1)
+#     torso_top = y1 + (y2 - y1) * 0.20
+#     torso_bottom = y1 + (y2 - y1) * 0.92
+#
+#     for wrist_index in (9, 10):
+#         if wrist_index >= len(keypoints) or float(keypoints[wrist_index, 2]) < CFG.KP_CONF:
+#             continue
+#         wrist_x = float(keypoints[wrist_index, 0])
+#         wrist_y = float(keypoints[wrist_index, 1])
+#         if not (torso_top <= wrist_y <= torso_bottom):
+#             continue
+#         extension = direction * (wrist_x - body_cx) / body_w
+#         if extension < CFG.WRIST_EXTEND_FRAC:
+#             continue
+#         if point_distance_to_box((wrist_x, wrist_y), neighbor.box) < point_distance_to_box((wrist_x, wrist_y), person.box) + body_w:
+#             return True
+#     return False
+#
+#
 def nearest_row_to_box(box: tuple[int, int, int, int], rows: list[StudentRow]) -> StudentRow | None:
     if not rows:
         return None
     cx, cy = box_center(box)
     inside_rows = [row for row in rows if point_inside_expanded_box((cx, cy), row.box, scale=0.18)]
-    candidates = inside_rows or rows
-    return min(candidates, key=lambda row: point_distance_to_box((cx, cy), row.box))
+    if inside_rows:
+        return min(inside_rows, key=lambda row: point_distance_to_box((cx, cy), row.box))
+
+    nearest = min(rows, key=lambda row: point_distance_to_box((cx, cy), row.box))
+    distance = point_distance_to_box((cx, cy), nearest.box)
+    distance_limit = max(
+        CFG.PHONE_ASSIGN_MAX_DISTANCE_PX,
+        box_width(nearest.box) * 0.60,
+        box_height(nearest.box) * 0.30,
+    )
+    if distance > distance_limit:
+        return None
+    return nearest
 
 
 def point_inside_expanded_box(point: tuple[float, float], box: tuple[int, int, int, int], scale: float) -> bool:

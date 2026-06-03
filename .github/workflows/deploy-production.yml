@@ -340,7 +340,7 @@ jobs:
                   SIGHTLINE_COLLECTSTATIC: "0"
                   SIGHTLINE_ANALYSIS_THREAD_FALLBACK: "0"
                   EXAM_AI_ANALYSIS_FPS: ${EXAM_AI_ANALYSIS_FPS:-2.0}
-                  EXAM_AI_MODEL_SIZE: ${EXAM_AI_MODEL_SIZE:-n}
+                  EXAM_AI_MODEL_SIZE: ${EXAM_AI_MODEL_SIZE:-s}
                 volumes:
                   - sightline-media:/app/apps/api-django/media
                 depends_on:
@@ -426,7 +426,7 @@ jobs:
             SIGHTLINE_CSRF_TRUSTED_ORIGINS=${SIGHTLINE_CSRF_TRUSTED_ORIGINS}
             SIGHTLINE_ANALYSIS_THREAD_FALLBACK=0
             EXAM_AI_ANALYSIS_FPS=2.0
-            EXAM_AI_MODEL_SIZE=n
+            EXAM_AI_MODEL_SIZE=s
             NEXT_PUBLIC_API_BASE_URL=${PUBLIC_URL}
             NEXT_PUBLIC_AUTH_BASE_URL=${PUBLIC_URL}
             NEXT_PUBLIC_WEB_BASE_URL=${PUBLIC_URL}

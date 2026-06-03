@@ -32,18 +32,19 @@ class SemanticReport:
             if mouth is not None:
                 signals.append(f"mouth-open ratio {mouth}")
             summary = f"Student {signal.student_id} appears to be talking at {signal.timestamp}."
-        elif alert_type == "paper-sharing":
-            risk = "medium"
-            neighbor = signal.neighbor_id or "a nearby student"
-            reason = evidence.get("share_reason", "wrist/hand extended away from own body")
-            signals = [
-                str(reason),
-                f"movement aimed toward student {neighbor}",
-            ]
-            summary = (
-                f"Student {signal.student_id} shows a possible paper-sharing gesture "
-                f"toward student {neighbor} at {signal.timestamp}."
-            )
+        # Paper-sharing detection is disabled for now.
+        # elif alert_type == "paper-sharing":
+        #     risk = "medium"
+        #     neighbor = signal.neighbor_id or "a nearby student"
+        #     reason = evidence.get("share_reason", "wrist/hand extended away from own body")
+        #     signals = [
+        #         str(reason),
+        #         f"movement aimed toward student {neighbor}",
+        #     ]
+        #     summary = (
+        #         f"Student {signal.student_id} shows a possible paper-sharing gesture "
+        #         f"toward student {neighbor} at {signal.timestamp}."
+        #     )
         else:
             risk = "medium"
             pose = evidence.get("pose", "head turned")
