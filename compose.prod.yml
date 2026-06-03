@@ -58,6 +58,7 @@ services:
       QDRANT_URL: http://qdrant:6333
       SIGHTLINE_DEBUG: "0"
       SIGHTLINE_COLLECTSTATIC: "1"
+      SIGHTLINE_ANALYSIS_THREAD_FALLBACK: "0"
     volumes:
       - sightline-static:/app/apps/api-django/staticfiles
       - sightline-media:/app/apps/api-django/media

@@ -32,6 +32,7 @@ services:
       SIGHTLINE_CSRF_TRUSTED_ORIGINS: http://localhost,http://127.0.0.1,http://localhost:3000,http://127.0.0.1:3000
       SIGHTLINE_DEBUG: "1"
       SIGHTLINE_SECRET_KEY: dev-only-sightline-secret
+      SIGHTLINE_ANALYSIS_THREAD_FALLBACK: "0"
     depends_on:
       db:
         condition: service_healthy

@@ -31,6 +31,13 @@ def index_course_material_task(material_id):
     return index_material(material) if material else 0
 
 
+@shared_task
+def analyze_exam_video_task(video_id):
+    from .video_analysis import analyze_exam_video
+
+    return analyze_exam_video(video_id)
+
+
 def queue_course_material_index(material_id):
     try:
         result = index_course_material_task.delay(material_id)
@@ -42,6 +49,17 @@ def queue_course_material_index(material_id):
 
 
 def queue_exam_video_analysis(video_id):
+    try:
+        result = analyze_exam_video_task.delay(video_id)
+        return {"mode": "celery", "task_id": result.id}
+    except Exception:
+        if not getattr(settings, "SIGHTLINE_ANALYSIS_THREAD_FALLBACK", True):
+            raise
+        logger.exception("Celery exam video analysis queue failed; using a background thread.")
+        return _queue_threaded_analysis(video_id)
+
+
+def _queue_threaded_analysis(video_id):
     with _analysis_lock:
         existing = _analysis_futures.get(video_id)
         if existing is not None and not existing.done():

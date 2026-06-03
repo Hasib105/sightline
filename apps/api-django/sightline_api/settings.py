@@ -145,3 +145,8 @@ CHANNEL_LAYERS = {
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_TASK_ALWAYS_EAGER = os.environ.get("CELERY_TASK_ALWAYS_EAGER", "0").lower() in {"1", "true", "yes"}
 SIGHTLINE_ANALYSIS_WORKERS = int(os.environ.get("SIGHTLINE_ANALYSIS_WORKERS", "1"))
+SIGHTLINE_ANALYSIS_THREAD_FALLBACK = os.environ.get("SIGHTLINE_ANALYSIS_THREAD_FALLBACK", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+}

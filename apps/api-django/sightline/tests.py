@@ -461,7 +461,7 @@ class SightlineApiSmokeTests(TestCase):
         self.assertEqual(video.status, ExamVideo.STATUS_UPLOADED)
         self.assertTrue(video.file_uri.startswith("exam_videos/"))
 
-        with patch("sightline.tasks.queue_exam_video_analysis", return_value={"mode": "realtime-thread", "task_id": None}) as queue:
+        with patch("sightline.tasks.queue_exam_video_analysis", return_value={"mode": "celery", "task_id": "task-123"}) as queue:
             start_response = self.client.post(f"/api/v1/exam-videos/{video.id}/analyze")
 
         self.assertEqual(start_response.status_code, 200)
@@ -516,12 +516,24 @@ class SightlineApiSmokeTests(TestCase):
         self.assertTrue(CFG.det_model_name().endswith("yolov8s.pt"))
         self.assertTrue(CFG.pose_model_name().endswith("yolov8s-pose.pt"))
 
-    def test_exam_video_analysis_queue_uses_realtime_thread(self):
+    def test_exam_video_analysis_queue_uses_celery(self):
         from . import tasks
 
-        with patch.object(tasks._analysis_executor, "submit") as submit:
-            submit.return_value = object()
+        with patch.object(tasks.analyze_exam_video_task, "delay") as delay:
+            delay.return_value.id = "task-123"
             queue_info = tasks.queue_exam_video_analysis(123)
+
+        self.assertEqual(queue_info["mode"], "celery")
+        self.assertEqual(queue_info["task_id"], "task-123")
+        delay.assert_called_once_with(123)
+
+    def test_exam_video_analysis_queue_falls_back_to_realtime_thread(self):
+        from . import tasks
+
+        with patch.object(tasks.analyze_exam_video_task, "delay", side_effect=RuntimeError("broker down")):
+            with patch.object(tasks._analysis_executor, "submit") as submit:
+                submit.return_value = object()
+                queue_info = tasks.queue_exam_video_analysis(123)
 
         self.assertEqual(queue_info["mode"], "realtime-thread")
         self.assertIsNone(queue_info["task_id"])
