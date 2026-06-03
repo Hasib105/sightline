@@ -10,7 +10,7 @@ async function proxyApiV1(request: NextRequest, context: RouteContext) {
   const { path } = await context.params;
   const targetPath = path.join("/");
   const search = request.nextUrl.search;
-  const body = ["GET", "HEAD"].includes(request.method) ? undefined : await request.text();
+  const body = ["GET", "HEAD"].includes(request.method) ? undefined : request.body;
   const headers = new Headers(request.headers);
 
   headers.delete("host");
@@ -20,8 +20,9 @@ async function proxyApiV1(request: NextRequest, context: RouteContext) {
     method: request.method,
     headers,
     body,
+    duplex: "half",
     redirect: "manual",
-  });
+  } as RequestInit);
 
   const responseHeaders = new Headers(upstream.headers);
   responseHeaders.delete("content-encoding");

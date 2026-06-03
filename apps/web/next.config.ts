@@ -1,4 +1,4 @@
-import type { NextConfig } from "next";
+import type { NextConfig, SizeLimit } from "next";
 import path from "path";
 import os from "os";
 import dotenv from "dotenv";
@@ -23,6 +23,9 @@ function devOrigins(): string[] {
 const nextConfig: NextConfig = {
   output: "standalone",
   allowedDevOrigins: devOrigins(),
+  experimental: {
+    proxyClientMaxBodySize: (process.env.NEXT_PROXY_CLIENT_MAX_BODY_SIZE || "512mb") as SizeLimit,
+  },
   async rewrites() {
     return [
       {

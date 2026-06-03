@@ -546,6 +546,40 @@ class SightlineApiSmokeTests(TestCase):
         self.assertTrue(_is_standing_person((100, 70, 190, 410), standing_keypoints))
         self.assertFalse(_is_standing_person((100, 70, 230, 300), seated_keypoints))
 
+    def test_person_fallback_merge_avoids_duplicate_student_boxes(self):
+        from .exam_detection.detector import Person, _matches_existing_person
+
+        existing = [
+            Person(
+                id=1,
+                box=(100, 100, 190, 260),
+                kpts=None,
+                confidence=0.88,
+            )
+        ]
+
+        self.assertTrue(_matches_existing_person((108, 112, 196, 268), existing))
+        self.assertTrue(_matches_existing_person((120, 125, 165, 200), existing))
+        self.assertFalse(_matches_existing_person((270, 105, 350, 260), existing))
+
+    def test_person_fallback_filters_standing_boxes(self):
+        import numpy as np
+
+        from .exam_detection.detector import Detector
+
+        detector = Detector.__new__(Detector)
+        standing_box = SimpleNamespace(xyxy=np.array([[100, 40, 150, 260]]), conf=np.array(0.90))
+        seated_box = SimpleNamespace(xyxy=np.array([[210, 120, 340, 260]]), conf=np.array(0.85))
+
+        with patch.object(CFG, "SEATED_STUDENTS_ONLY", True), patch.object(CFG, "PERSON_FALLBACK_FILTER_STANDING", True):
+            persons = []
+            detector._merge_detected_persons(persons, [SimpleNamespace(boxes=[standing_box])], min_area=1)
+            self.assertEqual(persons, [])
+
+            detector._merge_detected_persons(persons, [SimpleNamespace(boxes=[seated_box])], min_area=1)
+            self.assertEqual(len(persons), 1)
+            self.assertEqual(persons[0].box, (210, 120, 340, 260))
+
     def test_phone_assignment_ignores_far_phone_without_seated_row_overlap(self):
         from .exam_detection.behavior_engine import StudentRow, nearest_row_to_box
 

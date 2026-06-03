@@ -19,15 +19,29 @@ class CFG:
     MAX_MOUTH_CROPS = 8
     MAX_TALKERS_PER_FRAME = 1
 
-    POSE_CONF = 0.40
-    DET_CONF = 0.35
+    POSE_CONF = float(os.getenv("EXAM_AI_POSE_CONF", "0.40"))
+    DET_CONF = float(os.getenv("EXAM_AI_DET_CONF", "0.35"))
+    PERSON_DET_CONF = float(os.getenv("EXAM_AI_PERSON_DET_CONF", "0.25"))
     KP_CONF = 0.25
     GESTURE_KP_CONF = 0.12
     # Paper-sharing detection is disabled for now. Keep these settings here so
     # the feature can be restored without rebuilding the thresholds from memory.
     # SHARE_KP_CONF = 0.28
-    MIN_AREA_RATIO = 0.001
+    MIN_AREA_RATIO = float(os.getenv("EXAM_AI_MIN_AREA_RATIO", "0.0006"))
     IOU_DUPLICATE_THRESHOLD = 0.50
+    PERSON_FALLBACK_ENABLED = os.getenv("EXAM_AI_PERSON_FALLBACK_ENABLED", "true").lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    PERSON_FALLBACK_FILTER_STANDING = os.getenv("EXAM_AI_PERSON_FALLBACK_FILTER_STANDING", "true").lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    PERSON_MERGE_IOU_THRESHOLD = float(os.getenv("EXAM_AI_PERSON_MERGE_IOU_THRESHOLD", "0.35"))
     SEATED_STUDENTS_ONLY = os.getenv("EXAM_AI_SEATED_STUDENTS_ONLY", "true").lower() not in {
         "0",
         "false",

@@ -81,7 +81,19 @@ class Detector:
             conf=CFG.DET_CONF,
             verbose=False,
         )
+        person_det_results = []
+        if CFG.PERSON_FALLBACK_ENABLED:
+            person_det_results = self.det_model.track(
+                rgb_frame,
+                persist=True,
+                tracker="bytetrack.yaml",
+                classes=[CFG.PERSON_CLASS_ID],
+                conf=CFG.PERSON_DET_CONF,
+                verbose=False,
+            )
         persons = self._read_persons(pose_results, min_area)
+        if CFG.PERSON_FALLBACK_ENABLED:
+            self._merge_detected_persons(persons, person_det_results, min_area)
         self._read_person_mouth_ratios(rgb_frame, persons)
 
         return DetectionFrame(
@@ -187,6 +199,40 @@ class Detector:
                 )
         return phones
 
+    def _merge_detected_persons(self, persons: list[Person], det_results: Any, min_area: float) -> None:
+        fallback_index = 1
+        for result in det_results:
+            if result.boxes is None or len(result.boxes) == 0:
+                continue
+
+            for box in result.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                area = max(0, x2 - x1) * max(0, y2 - y1)
+                if area < min_area:
+                    continue
+
+                candidate_box = (x1, y1, x2, y2)
+                if (
+                    CFG.SEATED_STUDENTS_ONLY
+                    and CFG.PERSON_FALLBACK_FILTER_STANDING
+                    and _is_standing_person(candidate_box, None)
+                ):
+                    continue
+                if _matches_existing_person(candidate_box, persons):
+                    continue
+
+                confidence = float(box.conf.item()) if box.conf is not None else 0.0
+                persons.append(
+                    Person(
+                        id=_fallback_track_id(box, fallback_index),
+                        box=candidate_box,
+                        kpts=None,
+                        confidence=confidence,
+                        pose_available=False,
+                    )
+                )
+                fallback_index += 1
+
 
 def _load_yolo(model_name: str) -> Any:
     from ultralytics import YOLO
@@ -208,6 +254,10 @@ def _track_id(box: Any, fallback_index: int) -> int | str:
         except Exception:
             pass
     return f"student_{fallback_index}"
+
+
+def _fallback_track_id(box: Any, fallback_index: int) -> str:
+    return f"det_{_track_id(box, fallback_index)}"
 
 
 def _extract_keypoints(result: Any, idx: int) -> np.ndarray | None:
@@ -429,3 +479,27 @@ def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
     area_b = max(0, x4 - x3) * max(0, y4 - y3)
     union = area_a + area_b - inter
     return inter / union if union else 0.0
+
+
+def _matches_existing_person(candidate_box: tuple[int, int, int, int], persons: list[Person]) -> bool:
+    candidate_center = _center(candidate_box)
+    for person in persons:
+        if _iou(candidate_box, person.box) > CFG.PERSON_MERGE_IOU_THRESHOLD:
+            return True
+        if _point_inside_expanded_box(candidate_center, person.box, scale=0.08):
+            return True
+        if _point_inside_expanded_box(_center(person.box), candidate_box, scale=0.08):
+            return True
+    return False
+
+
+def _center(box: tuple[int, int, int, int]) -> tuple[float, float]:
+    x1, y1, x2, y2 = box
+    return (x1 + x2) / 2.0, (y1 + y2) / 2.0
+
+
+def _point_inside_expanded_box(point: tuple[float, float], box: tuple[int, int, int, int], scale: float) -> bool:
+    x1, y1, x2, y2 = box
+    pad_x = (x2 - x1) * scale
+    pad_y = (y2 - y1) * scale
+    return x1 - pad_x <= point[0] <= x2 + pad_x and y1 - pad_y <= point[1] <= y2 + pad_y
