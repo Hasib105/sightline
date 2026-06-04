@@ -8,6 +8,7 @@ Read in order:
 2. [Domain workflows and data](./02-domain-workflows-and-data.md)
 3. [System architecture](./03-system-architecture.md)
 4. [Delivery, validation, and roadmap](./04-delivery-validation-and-roadmap.md)
+5. [MVP funding feature overview](./05-mvp-funding-feature-overview.md)
 
 ## MVP Summary
 
