@@ -21,6 +21,7 @@ class CFG:
 
     POSE_CONF = float(os.getenv("EXAM_AI_POSE_CONF", "0.40"))
     DET_CONF = float(os.getenv("EXAM_AI_DET_CONF", "0.35"))
+    PHONE_CONF = float(os.getenv("EXAM_AI_PHONE_CONF", "0.25"))
     PERSON_DET_CONF = float(os.getenv("EXAM_AI_PERSON_DET_CONF", "0.25"))
     KP_CONF = 0.25
     GESTURE_KP_CONF = 0.12
@@ -72,6 +73,9 @@ class CFG:
     # SHARE_TARGET_MAX_DISTANCE_PX = 120
     NEIGHBOR_MAX_DISTANCE_PX = 360
     PHONE_ASSIGN_MAX_DISTANCE_PX = 180
+    PHONE_ASSIGN_EXPAND_SCALE = float(os.getenv("EXAM_AI_PHONE_ASSIGN_EXPAND_SCALE", "0.18"))
+    PHONE_SCORE_THRESHOLD = float(os.getenv("EXAM_AI_PHONE_SCORE_THRESHOLD", "6.0"))
+    PHONE_MIN_EVENTS = int(os.getenv("EXAM_AI_PHONE_MIN_EVENTS", "2"))
 
     WINDOW_SECONDS = 45.0
     COOLDOWN_SECONDS = 10.0

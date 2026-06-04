@@ -78,7 +78,7 @@ class Detector:
         det_results = self.det_model(
             rgb_frame,
             classes=[CFG.PHONE_CLASS_ID],
-            conf=CFG.DET_CONF,
+            conf=CFG.PHONE_CONF,
             verbose=False,
         )
         person_det_results = []

@@ -590,6 +590,30 @@ class SightlineApiSmokeTests(TestCase):
         self.assertEqual(nearest_row_to_box((130, 150, 155, 185), rows).id, "A1")
         self.assertIsNone(nearest_row_to_box((520, 80, 560, 130), rows))
 
+    def test_phone_alert_requires_confirmation(self):
+        from .exam_detection.behavior_engine import BehaviorEngine
+        from .exam_detection.detector import Person, Phone
+
+        engine = BehaviorEngine()
+        persons = [
+            Person(
+                id="A1",
+                box=(90, 90, 210, 260),
+                kpts=None,
+                confidence=0.9,
+                pose_available=False,
+            )
+        ]
+        phones = [Phone(box=(130, 150, 155, 185), confidence=0.72)]
+
+        first = engine.evaluate(persons, phones, face_results=None, frame_shape=(480, 640, 3), seconds=1.0)
+        second = engine.evaluate(persons, phones, face_results=None, frame_shape=(480, 640, 3), seconds=2.0)
+
+        self.assertEqual(first.alerts, [])
+        self.assertEqual(len(second.alerts), 1)
+        self.assertEqual(second.alerts[0].alert_type, "phone")
+        self.assertEqual(second.alerts[0].evidence["phone_confidence"], 0.72)
+
     def test_exam_video_analysis_queue_uses_celery(self):
         from . import tasks
 

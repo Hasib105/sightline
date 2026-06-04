@@ -295,7 +295,7 @@ class BehaviorEngine:
     ) -> None:
         seen_students: set[int | str] = set()
         for phone in phones:
-            row = nearest_row_to_box(phone.box, rows)
+            row, phone_distance = nearest_row_to_box_with_distance(phone.box, rows)
             if row is None:
                 continue
             row.phone = True
@@ -309,7 +309,11 @@ class BehaviorEngine:
             self.phone_events[row.id] = prune_window(self.phone_events[row.id], seconds)
             phone_count = len(self.phone_events[row.id])
 
-            if self._cooldown_ready(row.id, "phone", seconds):
+            if (
+                row.phone_score >= CFG.PHONE_SCORE_THRESHOLD
+                and phone_count >= CFG.PHONE_MIN_EVENTS
+                and self._cooldown_ready(row.id, "phone", seconds)
+            ):
                 alerts.append(
                     AlertSignal(
                         student_id=row.id,
@@ -319,7 +323,12 @@ class BehaviorEngine:
                         detail=f"Phone-sized object detected near student {row.id}",
                         count=phone_count,
                         confidence_score=round(row.phone_score, 2),
-                        evidence={"phone_count": phone_count},
+                        evidence={
+                            "phone_count": phone_count,
+                            "phone_confidence": round(phone.confidence, 3),
+                            "phone_distance": round(phone_distance, 1) if phone_distance is not None else None,
+                            "phone_box": phone.box,
+                        },
                     )
                 )
 
@@ -676,12 +685,25 @@ def face_toward_neighbor(
 #
 #
 def nearest_row_to_box(box: tuple[int, int, int, int], rows: list[StudentRow]) -> StudentRow | None:
+    row, _ = nearest_row_to_box_with_distance(box, rows)
+    return row
+
+
+def nearest_row_to_box_with_distance(
+    box: tuple[int, int, int, int],
+    rows: list[StudentRow],
+) -> tuple[StudentRow | None, float | None]:
     if not rows:
-        return None
+        return None, None
     cx, cy = box_center(box)
-    inside_rows = [row for row in rows if point_inside_expanded_box((cx, cy), row.box, scale=0.18)]
+    inside_rows = [
+        row
+        for row in rows
+        if point_inside_expanded_box((cx, cy), row.box, scale=CFG.PHONE_ASSIGN_EXPAND_SCALE)
+    ]
     if inside_rows:
-        return min(inside_rows, key=lambda row: point_distance_to_box((cx, cy), row.box))
+        row = min(inside_rows, key=lambda candidate: point_distance_to_box((cx, cy), candidate.box))
+        return row, point_distance_to_box((cx, cy), row.box)
 
     nearest = min(rows, key=lambda row: point_distance_to_box((cx, cy), row.box))
     distance = point_distance_to_box((cx, cy), nearest.box)
@@ -691,8 +713,8 @@ def nearest_row_to_box(box: tuple[int, int, int, int], rows: list[StudentRow]) -
         box_height(nearest.box) * 0.30,
     )
     if distance > distance_limit:
-        return None
-    return nearest
+        return None, None
+    return nearest, distance
 
 
 def point_inside_expanded_box(point: tuple[float, float], box: tuple[int, int, int, int], scale: float) -> bool:
