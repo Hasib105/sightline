@@ -189,6 +189,7 @@ export default function InvigilatorDashboardPage() {
   const videos = useMemo(() => videosQuery.data ?? [], [videosQuery.data]);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [uploadNote, setUploadNote] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState<number | null>(null);
 
   const uploadMutation = useMutation({
@@ -196,13 +197,23 @@ export default function InvigilatorDashboardPage() {
       if (!videoFile) {
         throw new Error("Select a video file.");
       }
-      return uploadExamVideo({ file: videoFile, notes: uploadNote.trim() });
+      setUploadProgress(0);
+      return uploadExamVideo(
+        { file: videoFile, notes: uploadNote.trim() },
+        {
+          onProgress: (percent) => setUploadProgress(percent),
+        }
+      );
     },
     onSuccess: async (video) => {
       setSelectedVideoId(video.id);
       setVideoFile(null);
       setUploadNote("");
+      setUploadProgress(null);
       await queryClient.invalidateQueries({ queryKey: ["exam-videos"] });
+    },
+    onError: () => {
+      setUploadProgress(null);
     },
   });
 
@@ -416,6 +427,14 @@ export default function InvigilatorDashboardPage() {
             {uploadMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
             Upload video
           </Button>
+          {uploadProgress !== null ? (
+            <div className="space-y-1">
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div className="h-full bg-brand-1 transition-all" style={{ width: `${uploadProgress}%` }} />
+              </div>
+              <p className="text-xs text-muted-foreground">Uploading… {uploadProgress}%</p>
+            </div>
+          ) : null}
           {uploadMutation.error ? <p className="text-sm text-red-600">{(uploadMutation.error as Error).message}</p> : null}
         </ConsolePanel>
 

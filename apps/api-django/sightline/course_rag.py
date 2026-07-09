@@ -47,6 +47,34 @@ COURSE_OUTLINE_TERMS = {
     "unit",
     "units",
 }
+RETRIEVAL_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "do",
+    "does",
+    "for",
+    "from",
+    "how",
+    "in",
+    "is",
+    "it",
+    "of",
+    "or",
+    "that",
+    "the",
+    "this",
+    "to",
+    "what",
+    "when",
+    "which",
+    "why",
+    "with",
+    "you",
+    "your",
+}
 
 
 def _tokenize(text: str) -> list[str]:
@@ -76,6 +104,29 @@ def _chunk_text(text: str, size: int = 900, overlap: int = 140) -> list[str]:
             chunks.append(chunk)
         start += max(size - overlap, 1)
     return chunks
+
+
+def _meaningful_terms(text: str) -> list[str]:
+    return [token for token in _tokenize(text) if token not in RETRIEVAL_STOPWORDS and len(token) > 1]
+
+
+def _lexical_relevance(question: str, context: dict) -> int:
+    query_terms = _meaningful_terms(question)
+    if not query_terms:
+        return 0
+    metadata = context.get("metadata", {})
+    searchable_text = " ".join(
+        [
+            context.get("text", ""),
+            str(metadata.get("title", "")),
+            str(metadata.get("kind", "")),
+        ]
+    )
+    searchable_terms = set(_tokenize(searchable_text))
+    term_hits = len(set(query_terms) & searchable_terms)
+    phrase = " ".join(query_terms)
+    phrase_boost = 2 if len(query_terms) > 1 and phrase in searchable_text.lower() else 0
+    return term_hits + phrase_boost
 
 
 @lru_cache(maxsize=None)
@@ -222,10 +273,10 @@ def retrieve_course_context(course: Course, question: str, unit: CourseUnit | No
         collection_name=QDRANT_COLLECTION,
         query=_embed_text(question),
         query_filter=models.Filter(must=must),
-        limit=limit,
+        limit=max(limit * 8, 32),
     )
     if result.points:
-        return [
+        contexts = [
             {
                 "text": point.payload.get("text", ""),
                 "score": float(point.score),
@@ -233,6 +284,8 @@ def retrieve_course_context(course: Course, question: str, unit: CourseUnit | No
             }
             for point in result.points
         ]
+        contexts.sort(key=lambda item: (_lexical_relevance(question, item), item["score"]), reverse=True)
+        return contexts[:limit]
 
     # Keep local development usable while an uploaded material is waiting for its background indexing job.
     query_terms = set(_tokenize(question))

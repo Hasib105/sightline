@@ -252,6 +252,16 @@ def default_hall():
     )
 
 
+def _save_uploaded_file(storage_name: str, upload) -> str:
+    if hasattr(upload, "chunks"):
+        with default_storage.open(storage_name, "wb") as destination:
+            for chunk in upload.chunks():
+                if chunk:
+                    destination.write(chunk)
+        return storage_name
+    return default_storage.save(storage_name, upload)
+
+
 def default_upload_exam_session():
     semester = default_semester()
     course, _ = Course.objects.get_or_create(
@@ -558,7 +568,7 @@ class ExamVideoSerializer(serializers.ModelSerializer):
             original_filename = get_valid_filename(Path(upload.name).name or "exam-video.mp4")
             extension = Path(original_filename).suffix.lower() or ".mp4"
             storage_name = f"exam_videos/{uuid4().hex}{extension}"
-            validated_data["file_uri"] = default_storage.save(storage_name, upload)
+            validated_data["file_uri"] = _save_uploaded_file(storage_name, upload)
             validated_data.setdefault("original_filename", original_filename)
         return super().create(validated_data)
 

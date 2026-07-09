@@ -8,8 +8,15 @@ export function apiBaseUrl(): string {
   if (typeof window === "undefined") {
     return normalizeBaseUrl(process.env.API_INTERNAL_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || DEFAULT_API_BASE_URL);
   }
-  const configured = process.env.NEXT_PUBLIC_API_BASE_URL;
+  const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
   if (configured) {
+    try {
+      if (new URL(configured).origin === window.location.origin) {
+        return "";
+      }
+    } catch {
+      // Fall back to the configured absolute URL below.
+    }
     return normalizeBaseUrl(configured);
   }
   return "";

@@ -22,11 +22,16 @@ RUN python -m pip install --upgrade pip \
 
 COPY apps/api-django ./apps/api-django
 COPY docker/api/entrypoint.sh ./docker/api/entrypoint.sh
+COPY docker/api/download_exam_models.py ./docker/api/download_exam_models.py
 
 RUN chmod +x ./docker/api/entrypoint.sh
 
 WORKDIR /app/apps/api-django
-ENV PATH="/app/.venv/bin:$PATH"
+ENV PATH="/app/.venv/bin:$PATH" \
+    EXAM_AI_MODEL_DIR=/app/apps/api-django/sightline/exam_detection/models \
+    EXAM_AI_MODEL_SIZE=s
+
+RUN python /app/docker/api/download_exam_models.py
 EXPOSE 8000
 
 ENTRYPOINT ["/app/docker/api/entrypoint.sh"]

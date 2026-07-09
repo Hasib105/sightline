@@ -24,7 +24,7 @@ const nextConfig: NextConfig = {
   output: "standalone",
   allowedDevOrigins: devOrigins(),
   experimental: {
-    proxyClientMaxBodySize: (process.env.NEXT_PROXY_CLIENT_MAX_BODY_SIZE || "512mb") as SizeLimit,
+    proxyClientMaxBodySize: (process.env.NEXT_PROXY_CLIENT_MAX_BODY_SIZE || "2gb") as SizeLimit,
   },
   async rewrites() {
     return [

@@ -33,7 +33,7 @@ from .tasks import index_course_material_task
 class SightlineApiSmokeTests(TestCase):
     @classmethod
     def setUpTestData(cls):
-        call_command("seed_sightline", verbosity=0)
+        call_command("seed_sightline", verbosity=0, skip_vector_index=True)
 
     def setUp(self):
         self.client = Client()
@@ -45,6 +45,8 @@ class SightlineApiSmokeTests(TestCase):
         self.env_patch = patch.dict(
             os.environ,
             {
+                "QDRANT_URL": "",
+                "QDRANT_API_KEY": "",
                 "SIGHTLINE_QDRANT_PATH": str(Path(self.temp_dir.name) / "qdrant"),
                 "SIGHTLINE_CHAT_CHECKPOINT_PATH": str(Path(self.temp_dir.name) / "checkpoints.sqlite3"),
             },
@@ -185,6 +187,28 @@ class SightlineApiSmokeTests(TestCase):
         self.assertGreater(indexed_chunks, 0)
         self.assertIn("partitioning around a pivot", contexts[0]["text"])
         self.assertIsNotNone(CourseMaterial.objects.get(id=material.id).indexed_at)
+
+    @patch.dict(os.environ, {"GROQ_API_KEY": ""})
+    def test_seeded_python_course_has_units_quizzes_and_vector_context(self):
+        call_command("seed_sightline", verbosity=0)
+        course = Course.objects.get(code="PY-101")
+        units = CourseUnit.objects.filter(course=course)
+        exam = ExamSession.objects.get(course=course, quiz_title="Python Unit Quiz Bank")
+        contexts = retrieve_course_context(course, "What does a list comprehension do?", limit=3)
+
+        self.assertEqual(course.title, "Python")
+        self.assertEqual(course.teacher.username, "teacher4")
+        self.assertEqual(units.count(), 10)
+        self.assertEqual(len(exam.quiz_questions), 50)
+        self.assertTrue(
+            CourseEnrollment.objects.filter(
+                course=course,
+                student__user__username="student",
+                status=CourseEnrollment.STATUS_ACTIVE,
+            ).exists()
+        )
+        self.assertTrue(CourseMaterial.objects.filter(course=course, indexed_at__isnull=False).exists())
+        self.assertIn("list comprehension", contexts[0]["text"].lower())
 
     @patch.dict(os.environ, {"GROQ_API_KEY": ""})
     def test_teacher_can_create_unit_and_student_can_chat_about_it(self):

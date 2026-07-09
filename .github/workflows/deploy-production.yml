@@ -228,6 +228,15 @@ jobs:
                     proxy_send_timeout 3600s;
                 }
 
+                location ~ ^/api/v1/exam-videos(/|$) {
+                    proxy_pass http://sightline_api;
+                    client_max_body_size 2g;
+                    client_body_timeout 3600s;
+                    proxy_request_buffering off;
+                    proxy_read_timeout 3600s;
+                    proxy_send_timeout 3600s;
+                }
+
                 location ~ ^/(api|auth|admin)(/|$) {
                     proxy_pass http://sightline_api;
                     proxy_read_timeout 300s;
@@ -305,6 +314,9 @@ jobs:
                   QDRANT_URL: http://qdrant:6333
                   SIGHTLINE_DEBUG: "0"
                   SIGHTLINE_COLLECTSTATIC: "1"
+                  SIGHTLINE_ANALYSIS_THREAD_FALLBACK: "0"
+                  EXAM_AI_MODEL_DIR: /app/apps/api-django/sightline/exam_detection/models
+                  EXAM_AI_MODEL_SIZE: ${EXAM_AI_MODEL_SIZE:-s}
                 volumes:
                   - sightline-static:/app/apps/api-django/staticfiles
                   - sightline-media:/app/apps/api-django/media
@@ -341,6 +353,7 @@ jobs:
                   SIGHTLINE_ANALYSIS_THREAD_FALLBACK: "0"
                   EXAM_AI_ANALYSIS_FPS: ${EXAM_AI_ANALYSIS_FPS:-2.0}
                   EXAM_AI_MODEL_SIZE: ${EXAM_AI_MODEL_SIZE:-s}
+                  EXAM_AI_MODEL_DIR: /app/apps/api-django/sightline/exam_detection/models
                 volumes:
                   - sightline-media:/app/apps/api-django/media
                 depends_on:

@@ -1,4 +1,5 @@
 import { apiFetchClient } from "@/lib/api-client";
+import { apiBaseUrl } from "@/lib/api-base-url";
 import type {
   AdminAnalytics,
   AdminOverview,
@@ -851,20 +852,50 @@ export async function listExamVideos(): Promise<ExamVideoSummary[]> {
   return parseResponse<ExamVideoSummary[]>(response);
 }
 
-export async function uploadExamVideo(payload: {
-  file: File;
-  notes?: string;
-}): Promise<ExamVideoSummary> {
+export async function uploadExamVideo(
+  payload: {
+    file: File;
+    notes?: string;
+  },
+  options?: {
+    onProgress?: (percent: number) => void;
+  }
+): Promise<ExamVideoSummary> {
   const formData = new FormData();
   formData.append("file", payload.file);
   formData.append("original_filename", payload.file.name);
   if (payload.notes) {
     formData.append("notes", payload.notes);
   }
-  const response = await apiFetchClient("/api/v1/exam-videos", {
-    method: "POST",
-    body: formData,
+
+  const baseUrl = apiBaseUrl();
+  const url = `${baseUrl}/api/v1/exam-videos`;
+
+  const response = await new Promise<Response>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.withCredentials = true;
+    xhr.responseType = "text";
+    xhr.upload.onprogress = (event) => {
+      if (!options?.onProgress || !event.lengthComputable) {
+        return;
+      }
+      options.onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+    };
+    xhr.onload = () => {
+      resolve(
+        new Response(xhr.responseText, {
+          status: xhr.status,
+          statusText: xhr.statusText,
+          headers: { "Content-Type": xhr.getResponseHeader("Content-Type") ?? "application/json" },
+        })
+      );
+    };
+    xhr.onerror = () => reject(new Error("Video upload failed due to a network error."));
+    xhr.onabort = () => reject(new Error("Video upload was cancelled."));
+    xhr.send(formData);
   });
+
   return parseResponse<ExamVideoSummary>(response);
 }
 

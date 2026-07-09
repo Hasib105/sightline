@@ -33,6 +33,8 @@ services:
       SIGHTLINE_DEBUG: "1"
       SIGHTLINE_SECRET_KEY: dev-only-sightline-secret
       SIGHTLINE_ANALYSIS_THREAD_FALLBACK: "0"
+      EXAM_AI_MODEL_DIR: /app/apps/api-django/sightline/exam_detection/models
+      EXAM_AI_MODEL_SIZE: s
     depends_on:
       db:
         condition: service_healthy
@@ -64,6 +66,7 @@ services:
       SIGHTLINE_ANALYSIS_THREAD_FALLBACK: "0"
       EXAM_AI_ANALYSIS_FPS: "2.0"
       EXAM_AI_MODEL_SIZE: s
+      EXAM_AI_MODEL_DIR: /app/apps/api-django/sightline/exam_detection/models
     depends_on:
       db:
         condition: service_healthy
