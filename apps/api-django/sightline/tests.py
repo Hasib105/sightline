@@ -684,7 +684,10 @@ class SightlineApiSmokeTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(len(response.json()["scores"]), 1)
+        # A run scores the whole enrolled roster (needed for the faculty dashboards),
+        # not only the submitted rows.
+        enrolled = CourseEnrollment.objects.filter(course=course).count()
+        self.assertEqual(len(response.json()["scores"]), enrolled)
         self.assertTrue(StudentRiskScore.objects.filter(course=course, student__student_number="S-1001").exists())
 
     def test_teacher_cannot_run_at_risk_analysis_for_another_teacher_course(self):

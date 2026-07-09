@@ -6,7 +6,6 @@ from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from sightline.course_rag import index_course
 from sightline.models import (
     AcademicRecordImport,
     AlertEvent,
@@ -28,6 +27,8 @@ from sightline.models import (
     OperationalHealth,
     ReminderRule,
     ReviewerAction,
+    RiskAssessmentRun,
+    ScheduledSession,
     Seat,
     Semester,
     StudentProfile,
@@ -774,64 +775,107 @@ class Command(BaseCommand):
             ]
         )
 
-        student_rows = []
+        def _profile(index):
+            # Deterministic per-student ability (0.25-0.94) and grade trend direction.
+            ability = 0.25 + ((index * 37) % 70) / 100.0
+            trend = ((index % 3) - 1) * 0.12  # declining / flat / improving
+            return ability, trend
+
+        def _clamp(value, low=0.03, high=0.99):
+            return max(low, min(high, value))
+
+        students = []
+        student_index = {}
         for index in range(1, 21):
             username = "student" if index == 1 else f"student{index:02d}"
-            first_name = users[username].first_name
-            student_rows.append(
-                (
-                    f"S-{1000 + index}",
-                    f"{first_name} Student",
-                    "2023-CSE-A" if index <= 10 else "2023-CSE-B",
-                    users[username],
-                    12 + (index * 3) % 13,
-                    24,
-                    Decimal(str(35 + (index * 7) % 55)),
-                    Decimal("100"),
-                )
-            )
-        students = []
-        for number, name, cohort, user, *_ in student_rows:
+            user = users[username]
+            number = f"S-{1000 + index}"
+            ability, _ = _profile(index)
             student, _ = StudentProfile.objects.update_or_create(
                 student_number=number,
-                defaults={"user": user, "department": cse, "full_name": name, "cohort": cohort},
+                defaults={
+                    "user": user,
+                    "department": cse,
+                    "full_name": f"{user.first_name} Student",
+                    "cohort": "2023-CSE-A" if index <= 10 else "2023-CSE-B",
+                    "previous_gpa": Decimal(str(round(1.3 + ability * 2.6, 2))),
+                },
             )
             students.append(student)
-            CourseEnrollment.objects.update_or_create(
-                course=algorithms,
-                student=student,
-                defaults={"status": CourseEnrollment.STATUS_ACTIVE},
-            )
-            CourseEnrollment.objects.update_or_create(
-                course=python_course,
-                student=student,
-                defaults={"status": CourseEnrollment.STATUS_ACTIVE},
-            )
+            student_index[student.id] = index
 
-        source_import, _ = AcademicRecordImport.objects.get_or_create(
-            semester=semester,
-            source_name="spring-2026-week-8-sample.csv",
-            defaults={"uploaded_by": users["teacher"], "status": AcademicRecordImport.STATUS_VALIDATED, "imported_rows": 4},
-        )
-        if not AttendanceRecord.objects.filter(source_import=source_import).exists():
-            for number, _name, _cohort, _user, attended, total, score, max_score in student_rows:
-                student = StudentProfile.objects.get(student_number=number)
-                AttendanceRecord.objects.create(
-                    source_import=source_import,
+        # Enroll students across courses so every department has risk data.
+        enrollment_map = {
+            algorithms: students,
+            python_course: students,
+            databases: [s for i, s in enumerate(students, start=1) if i % 2 == 0],
+            circuits: [s for i, s in enumerate(students, start=1) if i % 2 == 1],
+        }
+        for course, enrolled in enrollment_map.items():
+            for student in enrolled:
+                CourseEnrollment.objects.update_or_create(
+                    course=course,
                     student=student,
-                    course=algorithms,
-                    attended=attended,
-                    total=total,
+                    defaults={"status": CourseEnrollment.STATUS_ACTIVE},
                 )
-                AssessmentRecord.objects.create(
-                    source_import=source_import,
-                    student=student,
-                    course=algorithms,
-                    label="Midterm",
-                    score=score,
-                    max_score=max_score,
+
+        course_teacher = dict(course_teacher_pairs)
+
+        def _seed_course_history(course, enrolled):
+            """Three dated runs of attendance + quizzes + midterm + assignments + participation."""
+            uploaded_by = course_teacher.get(course, users["teacher"])
+            jitter = (sum(ord(c) for c in course.code) % 11 - 5) / 100.0  # stable per-course offset
+            for round_index, week in enumerate([4, 8, 12]):
+                ts = now - timezone.timedelta(weeks=(12 - week))
+                record_import = AcademicRecordImport.objects.create(
+                    semester=semester,
+                    uploaded_by=uploaded_by,
+                    source_name=f"{course.code.lower()}-week-{week}.csv",
+                    status=AcademicRecordImport.STATUS_VALIDATED,
+                    imported_rows=len(enrolled),
                 )
-            calculate_risk_run(source_import, algorithms)
+                for student in enrolled:
+                    index = student_index[student.id]
+                    ability, trend = _profile(index)
+                    perf = _clamp(ability + trend * (round_index - 1) + jitter)
+                    AttendanceRecord.objects.create(
+                        source_import=record_import,
+                        student=student,
+                        course=course,
+                        attended=round(_clamp(ability + trend * round_index) * week),
+                        total=week,
+                        created_at=ts,
+                    )
+                    AssessmentRecord.objects.create(
+                        source_import=record_import, student=student, course=course,
+                        label=f"Quiz {round_index + 1}", score=Decimal(str(round(perf * 20, 1))),
+                        max_score=Decimal("20"), created_at=ts,
+                    )
+                    submitted = ability > 0.4 or (index + round_index) % 2 == 0
+                    AssessmentRecord.objects.create(
+                        source_import=record_import, student=student, course=course,
+                        label=f"Assignment {round_index + 1}",
+                        score=Decimal(str(round(perf * 100, 1))) if submitted else Decimal("0"),
+                        max_score=Decimal("100"), created_at=ts,
+                    )
+                    if round_index == 1:
+                        AssessmentRecord.objects.create(
+                            source_import=record_import, student=student, course=course,
+                            label="Midterm", score=Decimal(str(round(_clamp(ability + jitter) * 100, 1))),
+                            max_score=Decimal("100"), created_at=ts,
+                        )
+                    if round_index == 2:
+                        AssessmentRecord.objects.create(
+                            source_import=record_import, student=student, course=course,
+                            label="Participation", score=Decimal(str(round(_clamp(ability) * 10, 1))),
+                            max_score=Decimal("10"), created_at=ts,
+                        )
+                run = calculate_risk_run(record_import, course)
+                RiskAssessmentRun.objects.filter(id=run.id).update(generated_at=ts)
+
+        if not RiskAssessmentRun.objects.exists():
+            for course, enrolled in enrollment_map.items():
+                _seed_course_history(course, enrolled)
 
         if not AlertEvent.objects.exists():
             alert = AlertEvent.objects.create(
@@ -900,6 +944,40 @@ class Command(BaseCommand):
                     ends_at=now + timezone.timedelta(days=1, hours=4),
                 )
 
+        if not ScheduledSession.objects.exists():
+            # Admin calendar: weekly classes + upcoming exams, each with a room (and
+            # invigilator for exams). Times are staggered per course to stay conflict-free.
+            monday = now + timezone.timedelta(days=(7 - now.weekday()))  # next Monday
+            monday = monday.replace(hour=9, minute=0, second=0, microsecond=0)
+            invigilators = [users["invigilator"], users["invigilator2"], users["invigilator3"]]
+            course_schedule = [
+                (algorithms, hall_a, [(0, 9), (2, 9)], 10, 10),   # (day_offset, hour) class slots; exam day/hour
+                (databases, hall_a, [(0, 11), (3, 11)], 11, 9),
+                (circuits, hall_b, [(1, 9), (3, 9)], 12, 9),
+                (python_course, hall_b, [(1, 13), (4, 13)], 13, 13),
+            ]
+            for slot, (course, hall, class_slots, exam_day, exam_hour) in enumerate(course_schedule):
+                for day_offset, hour in class_slots:
+                    start = monday + timezone.timedelta(days=day_offset, hours=hour - 9)
+                    ScheduledSession.objects.create(
+                        kind=ScheduledSession.KIND_CLASS,
+                        course=course,
+                        hall=hall,
+                        title=f"{course.code} lecture",
+                        starts_at=start,
+                        ends_at=start + timezone.timedelta(hours=1, minutes=20),
+                    )
+                exam_start = monday + timezone.timedelta(days=exam_day, hours=exam_hour - 9)
+                ScheduledSession.objects.create(
+                    kind=ScheduledSession.KIND_EXAM,
+                    course=course,
+                    hall=hall,
+                    invigilator=invigilators[slot % len(invigilators)],
+                    title=f"{course.code} final exam",
+                    starts_at=exam_start,
+                    ends_at=exam_start + timezone.timedelta(hours=2),
+                )
+
         ReminderRule.objects.get_or_create(event_type=ReminderRule.EVENT_CLASS, channel=ReminderRule.CHANNEL_IN_APP, minutes_before=240)
         ReminderRule.objects.get_or_create(event_type=ReminderRule.EVENT_EXAM, channel=ReminderRule.CHANNEL_EMAIL, minutes_before=1440)
         generate_due_notifications(now + timezone.timedelta(days=2))
@@ -935,6 +1013,8 @@ class Command(BaseCommand):
         python_indexed_chunks = None
         if not options.get("skip_vector_index"):
             try:
+                from sightline.course_rag import index_course  # lazy: avoids LLM stack when skipped
+
                 python_indexed_chunks = index_course(python_course)
             except Exception as exc:
                 self.stderr.write(

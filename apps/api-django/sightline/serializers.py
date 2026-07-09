@@ -23,13 +23,15 @@ from .models import (
     ExamSession,
     ExamVideo,
     ExamVideoAnalysisResult,
+    FacultyActionLog,
     Hall,
+    ScheduledSession,
     Semester,
     StudentProfile,
     StudentRiskScore,
     UserProfile,
 )
-from .services import calculate_risk_run
+from .services import calculate_risk_run, scheduling_conflicts
 
 
 def role_permissions(role):
@@ -651,6 +653,7 @@ class StudentRiskScoreSerializer(serializers.ModelSerializer):
             "risk_level",
             "risk_score",
             "contributing_factors",
+            "features",
             "created_at",
             "updated_at",
         ]
@@ -693,3 +696,79 @@ class AtRiskRunSerializer(serializers.Serializer):
                 max_score=max(assessment.get("max_score", row.get("max_score", row.get("maxScore", 100))), 1),
             )
         return calculate_risk_run(record_import, course)
+
+
+class FacultyActionLogSerializer(serializers.ModelSerializer):
+    faculty_username = serializers.CharField(source="faculty.username", read_only=True)
+    student_name = serializers.CharField(source="student.full_name", read_only=True)
+    student_number = serializers.CharField(source="student.student_number", read_only=True)
+    course_code = serializers.CharField(source="course.code", read_only=True)
+
+    class Meta:
+        model = FacultyActionLog
+        fields = [
+            "id",
+            "faculty",
+            "faculty_username",
+            "student",
+            "student_name",
+            "student_number",
+            "course",
+            "course_code",
+            "risk_score",
+            "action",
+            "note",
+            "created_at",
+        ]
+        read_only_fields = ["faculty", "created_at"]
+
+    def create(self, validated_data):
+        validated_data["faculty"] = request_user(self.context["request"])
+        return super().create(validated_data)
+
+
+class ScheduledSessionSerializer(serializers.ModelSerializer):
+    course_code = serializers.CharField(source="course.code", read_only=True)
+    course_title = serializers.CharField(source="course.title", read_only=True)
+    hall_name = serializers.CharField(source="hall.name", read_only=True)
+    invigilator_username = serializers.CharField(source="invigilator.username", read_only=True)
+    conflicts = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ScheduledSession
+        fields = [
+            "id",
+            "kind",
+            "course",
+            "course_code",
+            "course_title",
+            "hall",
+            "hall_name",
+            "invigilator",
+            "invigilator_username",
+            "title",
+            "starts_at",
+            "ends_at",
+            "conflicts",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+
+    def get_conflicts(self, session):
+        return scheduling_conflicts(
+            session.hall_id,
+            session.starts_at,
+            session.ends_at,
+            invigilator_id=session.invigilator_id,
+            course_id=session.course_id,
+            exclude_id=session.id,
+        )
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        starts_at = attrs.get("starts_at") or getattr(self.instance, "starts_at", None)
+        ends_at = attrs.get("ends_at") or getattr(self.instance, "ends_at", None)
+        if starts_at and ends_at and ends_at <= starts_at:
+            raise serializers.ValidationError("ends_at must be after starts_at.")
+        return attrs

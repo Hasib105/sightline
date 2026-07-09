@@ -54,6 +54,17 @@ import type {
   SearchIntelligenceResponse,
   SearchResponse,
   StudentRiskScore,
+  RiskHeatmapRow,
+  FeatureImportanceResponse,
+  RiskTrendPoint,
+  FacultyActionLogItem,
+  StudentRiskDetail,
+  ScheduleConflict,
+  ScheduledSession,
+  ScheduledSessionPayload,
+  StudentScheduleResponse,
+  HallOption,
+  InvigilatorOption,
   SystemSetting,
   UserSetting,
 } from "@/lib/types";
@@ -927,4 +938,130 @@ export async function runAtRiskAnalysis(
     body: JSON.stringify(payload),
   });
   return parseResponse<AtRiskRunResponse>(response);
+}
+
+// --- Student analytics (ML failure prediction) ---
+
+export async function getRiskHeatmap(): Promise<{ departments: RiskHeatmapRow[] }> {
+  const response = await apiFetchClient("/api/v1/analytics/risk/heatmap");
+  return parseResponse<{ departments: RiskHeatmapRow[] }>(response);
+}
+
+export async function getRiskRanking(params: {
+  level?: string;
+  department?: string;
+  course?: number;
+} = {}): Promise<StudentRiskScore[]> {
+  const query = new URLSearchParams();
+  if (params.level) query.set("level", params.level);
+  if (params.department) query.set("department", params.department);
+  if (params.course) query.set("course", String(params.course));
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const response = await apiFetchClient(`/api/v1/analytics/risk/ranking${suffix}`);
+  return parseResponse<StudentRiskScore[]>(response);
+}
+
+export async function getFeatureImportance(course?: number): Promise<FeatureImportanceResponse> {
+  const suffix = course ? `?course=${course}` : "";
+  const response = await apiFetchClient(`/api/v1/analytics/risk/feature-importance${suffix}`);
+  return parseResponse<FeatureImportanceResponse>(response);
+}
+
+export async function getRiskTrends(params: { student?: number; course?: number } = {}): Promise<{ points: RiskTrendPoint[] }> {
+  const query = new URLSearchParams();
+  if (params.student) query.set("student", String(params.student));
+  if (params.course) query.set("course", String(params.course));
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const response = await apiFetchClient(`/api/v1/analytics/risk/trends${suffix}`);
+  return parseResponse<{ points: RiskTrendPoint[] }>(response);
+}
+
+export async function getStudentRiskDetail(studentId: number): Promise<StudentRiskDetail> {
+  const response = await apiFetchClient(`/api/v1/students/${studentId}/risk`);
+  return parseResponse<StudentRiskDetail>(response);
+}
+
+export async function listFacultyActions(studentId?: number): Promise<FacultyActionLogItem[]> {
+  const suffix = studentId ? `?student=${studentId}` : "";
+  const response = await apiFetchClient(`/api/v1/faculty-actions${suffix}`);
+  return parseResponse<FacultyActionLogItem[]>(response);
+}
+
+export async function createFacultyAction(payload: {
+  student: number;
+  course?: number | null;
+  action: string;
+  note?: string;
+}): Promise<FacultyActionLogItem> {
+  const response = await apiFetchClient("/api/v1/faculty-actions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<FacultyActionLogItem>(response);
+}
+
+// --- Smart scheduling ---
+
+export async function listSchedules(params: { kind?: string; course?: number } = {}): Promise<ScheduledSession[]> {
+  const query = new URLSearchParams();
+  if (params.kind) query.set("kind", params.kind);
+  if (params.course) query.set("course", String(params.course));
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const response = await apiFetchClient(`/api/v1/schedules${suffix}`);
+  return parseResponse<ScheduledSession[]>(response);
+}
+
+export async function createSchedule(payload: ScheduledSessionPayload): Promise<ScheduledSession> {
+  const response = await apiFetchClient("/api/v1/schedules", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<ScheduledSession>(response);
+}
+
+export async function updateSchedule(id: number, payload: Partial<ScheduledSessionPayload>): Promise<ScheduledSession> {
+  const response = await apiFetchClient(`/api/v1/schedules/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<ScheduledSession>(response);
+}
+
+export async function deleteSchedule(id: number): Promise<{ deleted: boolean; record_id: number }> {
+  const response = await apiFetchClient(`/api/v1/schedules/${id}`, { method: "DELETE" });
+  return parseResponse<{ deleted: boolean; record_id: number }>(response);
+}
+
+export async function checkScheduleConflicts(payload: {
+  hall: number;
+  starts_at: string;
+  ends_at: string;
+  course?: number | null;
+  invigilator?: number | null;
+  id?: number;
+}): Promise<{ conflicts: ScheduleConflict[] }> {
+  const response = await apiFetchClient("/api/v1/schedules/conflicts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<{ conflicts: ScheduleConflict[] }>(response);
+}
+
+export async function getMySchedule(): Promise<StudentScheduleResponse> {
+  const response = await apiFetchClient("/api/v1/schedules/my");
+  return parseResponse<StudentScheduleResponse>(response);
+}
+
+export async function listHalls(): Promise<HallOption[]> {
+  const response = await apiFetchClient("/api/v1/halls");
+  return parseResponse<HallOption[]>(response);
+}
+
+export async function listInvigilators(): Promise<InvigilatorOption[]> {
+  const response = await apiFetchClient("/api/v1/invigilators");
+  return parseResponse<InvigilatorOption[]>(response);
 }

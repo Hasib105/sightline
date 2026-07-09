@@ -10,9 +10,10 @@ from django.contrib.auth import authenticate, get_user, login as django_login, l
 from django.contrib.auth.models import User
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Avg, Count, Max
 from django.http import JsonResponse, StreamingHttpResponse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -37,15 +38,26 @@ from .models import (
     ExamSession,
     ExamVideo,
     ExamVideoAnalysisResult,
+    FacultyActionLog,
+    Hall,
     NotificationEvent,
     OperationalHealth,
     ReviewerAction,
+    RiskAssessmentRun,
+    ScheduledSession,
     StudentProfile,
     StudentRiskScore,
     UserProfile,
 )
+from . import predict
 from .course_rag import answer_course_question, index_course, remove_material_index, stream_course_question_events
-from .services import agenda_for_student, calculate_risk_run, generate_due_notifications
+from .services import (
+    agenda_for_student,
+    calculate_risk_run,
+    generate_due_notifications,
+    scheduling_conflicts,
+    sessions_for_student,
+)
 from .tasks import queue_course_material_index
 
 
@@ -162,6 +174,26 @@ def can_manage_course(request, course):
     return is_admin_request(request) or (
         user_role(request) == UserProfile.ROLE_TEACHER and course.teacher_id == django_user(request).id
     )
+
+
+def latest_run_ids():
+    """Most recent completed risk run id per course (DB-agnostic; small data)."""
+    seen, ids = set(), []
+    for run in RiskAssessmentRun.objects.order_by("course_id", "-generated_at", "-id").only("id", "course_id"):
+        if run.course_id not in seen:
+            seen.add(run.course_id)
+            ids.append(run.id)
+    return ids
+
+
+def latest_scores_for_request(request):
+    """Latest risk score per student/course, scoped to the requesting teacher."""
+    queryset = StudentRiskScore.objects.filter(run_id__in=latest_run_ids()).select_related(
+        "student", "course", "course__department", "run"
+    )
+    if user_role(request) == UserProfile.ROLE_TEACHER and not is_admin_request(request):
+        queryset = queryset.filter(course__teacher=django_user(request))
+    return queryset
 
 
 class SessionlessAPIView(APIView):
@@ -756,6 +788,180 @@ class ApiV1DispatchView(SessionlessAPIView):
                     },
                     status=status.HTTP_201_CREATED,
                 )
+
+        if clean_path == "analytics/risk/heatmap" and request.method == "GET":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if not has_role(request, UserProfile.ROLE_TEACHER):
+                return Response({"detail": "Only teachers or admins can view risk analytics."}, status=status.HTTP_403_FORBIDDEN)
+            return Response(risk_heatmap_payload(request))
+
+        if clean_path == "analytics/risk/ranking" and request.method == "GET":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if not has_role(request, UserProfile.ROLE_TEACHER):
+                return Response({"detail": "Only teachers or admins can view risk analytics."}, status=status.HTTP_403_FORBIDDEN)
+            queryset = latest_scores_for_request(request)
+            level = request.GET.get("level")
+            if level:
+                queryset = queryset.filter(risk_level=level)
+            department = request.GET.get("department")
+            if department:
+                queryset = queryset.filter(course__department__code=department)
+            course_id = request.GET.get("course")
+            if course_id and course_id.isdigit():
+                queryset = queryset.filter(course_id=int(course_id))
+            queryset = queryset.order_by("-risk_score", "student__full_name")
+            return Response(serializers.StudentRiskScoreSerializer(queryset, many=True).data)
+
+        if clean_path == "analytics/risk/feature-importance" and request.method == "GET":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if not has_role(request, UserProfile.ROLE_TEACHER):
+                return Response({"detail": "Only teachers or admins can view risk analytics."}, status=status.HTTP_403_FORBIDDEN)
+            return Response(feature_importance_payload(request))
+
+        if clean_path == "analytics/risk/trends" and request.method == "GET":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if not has_role(request, UserProfile.ROLE_TEACHER):
+                return Response({"detail": "Only teachers or admins can view risk analytics."}, status=status.HTTP_403_FORBIDDEN)
+            return Response(risk_trends_payload(request))
+
+        if clean_path.startswith("students/") and clean_path.endswith("/risk") and request.method == "GET":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if not has_role(request, UserProfile.ROLE_TEACHER):
+                return Response({"detail": "Only teachers or admins can view student risk detail."}, status=status.HTTP_403_FORBIDDEN)
+            parts = clean_path.split("/")
+            if len(parts) != 3 or not parts[1].isdigit():
+                return Response({"detail": "Invalid student route."}, status=status.HTTP_404_NOT_FOUND)
+            payload = student_risk_detail_payload(request, int(parts[1]))
+            if payload is None:
+                return Response({"detail": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(payload)
+
+        if clean_path == "faculty-actions":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if not has_role(request, UserProfile.ROLE_TEACHER):
+                return Response({"detail": "Only teachers or admins can manage the faculty action log."}, status=status.HTTP_403_FORBIDDEN)
+            if request.method == "GET":
+                queryset = FacultyActionLog.objects.select_related("faculty", "student", "course").order_by("-created_at")
+                if user_role(request) == UserProfile.ROLE_TEACHER and not is_admin_request(request):
+                    queryset = queryset.filter(course__teacher=django_user(request))
+                student_id = request.GET.get("student")
+                if student_id and student_id.isdigit():
+                    queryset = queryset.filter(student_id=int(student_id))
+                return Response(serializers.FacultyActionLogSerializer(queryset[:200], many=True).data)
+            if request.method == "POST":
+                serializer = serializers.FacultyActionLogSerializer(data=request.data, context={"request": request})
+                serializer.is_valid(raise_exception=True)
+                action = serializer.save()
+                return Response(serializers.FacultyActionLogSerializer(action).data, status=status.HTTP_201_CREATED)
+
+        if clean_path == "halls" and request.method == "GET":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if not has_role(request, UserProfile.ROLE_TEACHER):
+                return Response({"detail": "Only teachers or admins can list halls."}, status=status.HTTP_403_FORBIDDEN)
+            halls = Hall.objects.order_by("name").values("id", "name", "building", "capacity")
+            return Response(list(halls))
+
+        if clean_path == "invigilators" and request.method == "GET":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if not has_role(request, UserProfile.ROLE_TEACHER):
+                return Response({"detail": "Only teachers or admins can list invigilators."}, status=status.HTTP_403_FORBIDDEN)
+            users = User.objects.filter(sightline_profile__role=UserProfile.ROLE_INVIGILATOR).order_by("username")
+            return Response([{"id": u.id, "username": u.username, "email": u.email} for u in users])
+
+        if clean_path == "schedules/my" and request.method == "GET":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            student = serializers.student_for_user(django_user(request))
+            if not student:
+                return Response({"student": None, "sessions": []})
+            sessions = sessions_for_student(student).order_by("starts_at")
+            return Response(
+                {
+                    "student": {"name": student.full_name, "studentNumber": student.student_number},
+                    "sessions": serializers.ScheduledSessionSerializer(sessions, many=True).data,
+                }
+            )
+
+        if clean_path == "schedules/conflicts" and request.method == "POST":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if not has_role(request, UserProfile.ROLE_TEACHER):
+                return Response({"detail": "Only teachers or admins can manage scheduling."}, status=status.HTTP_403_FORBIDDEN)
+            data = request.data
+            starts_at = parse_datetime(data.get("starts_at"))
+            ends_at = parse_datetime(data.get("ends_at"))
+            if not data.get("hall") or not starts_at or not ends_at:
+                return Response({"detail": "hall, starts_at and ends_at are required."}, status=status.HTTP_400_BAD_REQUEST)
+            conflicts = scheduling_conflicts(
+                data.get("hall"),
+                starts_at,
+                ends_at,
+                invigilator_id=data.get("invigilator") or None,
+                course_id=data.get("course") or None,
+                exclude_id=data.get("id") or None,
+            )
+            return Response({"conflicts": conflicts})
+
+        if clean_path == "schedules":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if request.method == "GET":
+                queryset = ScheduledSession.objects.select_related("course", "hall", "invigilator").order_by("starts_at")
+                kind = request.GET.get("kind")
+                if kind:
+                    queryset = queryset.filter(kind=kind)
+                course_id = request.GET.get("course")
+                if course_id and course_id.isdigit():
+                    queryset = queryset.filter(course_id=int(course_id))
+                return Response(serializers.ScheduledSessionSerializer(queryset, many=True).data)
+            if request.method == "POST":
+                if not has_role(request, UserProfile.ROLE_TEACHER):
+                    return Response({"detail": "Only teachers or admins can create schedules."}, status=status.HTTP_403_FORBIDDEN)
+                serializer = serializers.ScheduledSessionSerializer(data=request.data)
+                serializer.is_valid(raise_exception=True)
+                session = serializer.save()
+                return Response(serializers.ScheduledSessionSerializer(session).data, status=status.HTTP_201_CREATED)
+
+        if clean_path.startswith("schedules/"):
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            parts = clean_path.split("/")
+            if len(parts) != 2 or not parts[1].isdigit():
+                return Response({"detail": "Invalid schedule route."}, status=status.HTTP_404_NOT_FOUND)
+            session = ScheduledSession.objects.filter(id=int(parts[1])).first()
+            if not session:
+                return Response({"detail": "Scheduled session not found."}, status=status.HTTP_404_NOT_FOUND)
+            if not has_role(request, UserProfile.ROLE_TEACHER):
+                return Response({"detail": "Only teachers or admins can manage schedules."}, status=status.HTTP_403_FORBIDDEN)
+            if request.method in {"PATCH", "PUT"}:
+                serializer = serializers.ScheduledSessionSerializer(session, data=request.data, partial=True)
+                serializer.is_valid(raise_exception=True)
+                session = serializer.save()
+                return Response(serializers.ScheduledSessionSerializer(session).data)
+            if request.method == "DELETE":
+                record_id = session.id
+                session.delete()
+                return Response({"deleted": True, "record_id": record_id})
 
         return self.compatibility_response(request, clean_path)
 
@@ -1736,6 +1942,112 @@ def simulate_alert(_request):
     payload = serialize_alert(alert, detail=True)
     async_to_sync(get_channel_layer().group_send)("alerts", {"type": "alert.created", "payload": payload})
     return JsonResponse({"alert": payload}, status=201)
+
+
+def risk_heatmap_payload(request):
+    """Per-department risk breakdown from the latest run of each course."""
+    scores = latest_scores_for_request(request)
+    departments = {}
+    for score in scores:
+        dept = score.course.department.code
+        bucket = departments.setdefault(
+            dept,
+            {"department": dept, "high": 0, "medium": 0, "low": 0, "total": 0, "scoreSum": 0},
+        )
+        bucket[score.risk_level] += 1
+        bucket["total"] += 1
+        bucket["scoreSum"] += score.risk_score
+    rows = []
+    for bucket in departments.values():
+        total = bucket.pop("total")
+        score_sum = bucket.pop("scoreSum")
+        bucket["count"] = total
+        bucket["avgRisk"] = round(score_sum / total, 1) if total else 0
+        rows.append(bucket)
+    rows.sort(key=lambda item: item["avgRisk"], reverse=True)
+    return {"departments": rows}
+
+
+def feature_importance_payload(request):
+    """Feature importances from the most recent run (optionally for a course)."""
+    runs = RiskAssessmentRun.objects.exclude(feature_importance={})
+    if user_role(request) == UserProfile.ROLE_TEACHER and not is_admin_request(request):
+        runs = runs.filter(course__teacher=django_user(request))
+    course_id = request.GET.get("course")
+    if course_id and course_id.isdigit():
+        runs = runs.filter(course_id=int(course_id))
+    run = runs.order_by("-generated_at", "-id").first()
+    importance = run.feature_importance if run else predict.feature_importance()
+    features = [
+        {"key": key, "label": predict.FEATURE_LABELS.get(key, key), "weight": importance.get(key, 0)}
+        for key in predict.FEATURE_KEYS
+    ]
+    features.sort(key=lambda item: item["weight"], reverse=True)
+    return {
+        "model": run.model_name if run else predict.model_name(),
+        "generatedAt": run.generated_at.isoformat() if run else None,
+        "features": features,
+    }
+
+
+def risk_trends_payload(request):
+    """Historical risk score series across runs for a student (and optional course)."""
+    queryset = StudentRiskScore.objects.select_related("student", "course", "run").order_by("run__generated_at", "id")
+    if user_role(request) == UserProfile.ROLE_TEACHER and not is_admin_request(request):
+        queryset = queryset.filter(course__teacher=django_user(request))
+    student_id = request.GET.get("student")
+    if student_id and student_id.isdigit():
+        queryset = queryset.filter(student_id=int(student_id))
+    course_id = request.GET.get("course")
+    if course_id and course_id.isdigit():
+        queryset = queryset.filter(course_id=int(course_id))
+    points = [
+        {
+            "generatedAt": score.run.generated_at.isoformat(),
+            "riskScore": score.risk_score,
+            "riskLevel": score.risk_level,
+            "student": score.student.full_name,
+            "course": score.course.code,
+        }
+        for score in queryset[:500]
+    ]
+    return {"points": points}
+
+
+def student_risk_detail_payload(request, student_id):
+    student = StudentProfile.objects.filter(id=student_id).first()
+    if not student:
+        return None
+    scoped = latest_scores_for_request(request).filter(student=student).order_by("-risk_score")
+    latest = list(scoped)
+    history = StudentRiskScore.objects.filter(student=student).select_related("course", "run")
+    if user_role(request) == UserProfile.ROLE_TEACHER and not is_admin_request(request):
+        history = history.filter(course__teacher=django_user(request))
+    actions = FacultyActionLog.objects.filter(student=student).select_related("faculty", "course").order_by("-created_at")
+    if user_role(request) == UserProfile.ROLE_TEACHER and not is_admin_request(request):
+        actions = actions.filter(course__teacher=django_user(request))
+    return {
+        "student": {
+            "id": student.id,
+            "name": student.full_name,
+            "studentNumber": student.student_number,
+            "cohort": student.cohort,
+            "department": student.department.code if student.department_id else None,
+            "previousGpa": float(student.previous_gpa or 0),
+        },
+        "latest": serializers.StudentRiskScoreSerializer(latest, many=True).data,
+        "featureLabels": predict.FEATURE_LABELS,
+        "history": [
+            {
+                "generatedAt": score.run.generated_at.isoformat(),
+                "course": score.course.code,
+                "riskScore": score.risk_score,
+                "riskLevel": score.risk_level,
+            }
+            for score in history.order_by("run__generated_at", "id")[:200]
+        ],
+        "actions": serializers.FacultyActionLogSerializer(actions[:100], many=True).data,
+    }
 
 
 def risk_dashboard(_request):

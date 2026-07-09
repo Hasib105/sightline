@@ -14,8 +14,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowUpRight,
+  BarChart3,
   Bell,
   BookOpenCheck,
+  CalendarClock,
+  CalendarDays,
   CheckCheck,
   ChevronDown,
   ChevronLeft,
@@ -90,6 +93,9 @@ const routeLabels: Record<string, string> = {
   "/dashboard/teacher/exams": "Teacher Exams",
   "/dashboard/teacher/materials": "Course materials",
   "/dashboard/teacher/risk": "At-risk Students",
+  "/dashboard/teacher/analytics": "Student Analytics",
+  "/dashboard/scheduling": "Scheduling",
+  "/dashboard/schedule": "My Schedule",
   "/dashboard/invigilator": "Invigilator Review",
   "/dashboard/playground": "Playground",
   "/dashboard/api-keys": "API Keys",
@@ -192,6 +198,7 @@ function navigationFor(kind: ShellKind, user: CurrentUser): ShellSection[] {
       items: [
         { href: "/dashboard/courses", icon: BookOpenCheck, label: "Enroll Courses" },
         { href: "/dashboard/exams", icon: ClipboardList, label: "Give Exams" },
+        { href: "/dashboard/schedule", icon: CalendarDays, label: "My Schedule" },
       ],
     });
   }
@@ -211,6 +218,8 @@ function navigationFor(kind: ShellKind, user: CurrentUser): ShellSection[] {
         { href: "/dashboard/teacher/exams", icon: ClipboardList, label: "Exams" },
         { href: "/dashboard/teacher/materials", icon: Upload, label: "Course Materials" },
         { href: "/dashboard/teacher/risk", icon: AlertTriangle, label: "At-risk Students" },
+        { href: "/dashboard/teacher/analytics", icon: BarChart3, label: "Student Analytics" },
+        { href: "/dashboard/scheduling", icon: CalendarClock, label: "Scheduling" },
       ],
     });
   }

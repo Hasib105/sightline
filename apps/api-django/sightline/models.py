@@ -155,6 +155,8 @@ class StudentProfile(TimestampedModel):
     student_number = models.CharField(max_length=48, unique=True)
     full_name = models.CharField(max_length=160)
     cohort = models.CharField(max_length=80)
+    # Prior cumulative GPA (0-4 scale) used as an ML feature for failure prediction.
+    previous_gpa = models.DecimalField(max_digits=3, decimal_places=2, default=0)
 
     def __str__(self):
         return self.full_name
@@ -459,6 +461,9 @@ class RiskAssessmentRun(TimestampedModel):
     source_import = models.ForeignKey(AcademicRecordImport, on_delete=models.PROTECT)
     status = models.CharField(max_length=24, choices=STATUS_CHOICES)
     generated_at = models.DateTimeField(default=timezone.now)
+    model_name = models.CharField(max_length=80, blank=True)
+    # Global feature importances from the fitted model: {feature_key: weight}.
+    feature_importance = models.JSONField(default=dict, blank=True)
 
 
 class StudentRiskScore(TimestampedModel):
@@ -473,9 +478,68 @@ class StudentRiskScore(TimestampedModel):
     risk_level = models.CharField(max_length=16, choices=LEVEL_CHOICES)
     risk_score = models.PositiveIntegerField()
     contributing_factors = models.JSONField(default=list)
+    # Computed 0-1 feature vector fed to the model, kept for the detail page.
+    features = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ("-risk_score", "student__full_name")
+
+
+class FacultyActionLog(TimestampedModel):
+    ACTION_AUTO_EMAIL = "auto_email"
+    ACTION_EMAIL = "email"
+    ACTION_MEETING = "meeting"
+    ACTION_CALL = "call"
+    ACTION_NOTE = "note"
+    ACTION_CHOICES = [
+        (ACTION_AUTO_EMAIL, "Automatic email"),
+        (ACTION_EMAIL, "Email"),
+        (ACTION_MEETING, "Meeting"),
+        (ACTION_CALL, "Call"),
+        (ACTION_NOTE, "Note"),
+    ]
+
+    faculty = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="faculty_actions")
+    student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="faculty_actions")
+    course = models.ForeignKey(Course, null=True, blank=True, on_delete=models.SET_NULL)
+    risk_score = models.ForeignKey(StudentRiskScore, null=True, blank=True, on_delete=models.SET_NULL, related_name="actions")
+    action = models.CharField(max_length=32, choices=ACTION_CHOICES)
+    note = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.action} for {self.student} ({self.created_at:%Y-%m-%d})"
+
+
+class ScheduledSession(TimestampedModel):
+    """Admin-managed calendar event (a class meeting or an exam sitting).
+
+    One row per event; enrolled students derive their timetable from the course.
+    Room = hall, invigilator = optional assigned proctor. Conflict detection runs
+    over this single table (see services.scheduling_conflicts).
+    """
+
+    KIND_CLASS = "class"
+    KIND_EXAM = "exam"
+    KIND_CHOICES = [(KIND_CLASS, "Class"), (KIND_EXAM, "Exam")]
+
+    kind = models.CharField(max_length=16, choices=KIND_CHOICES, default=KIND_CLASS)
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="scheduled_sessions")
+    hall = models.ForeignKey(Hall, on_delete=models.PROTECT, related_name="scheduled_sessions")
+    invigilator = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name="invigilating_sessions"
+    )
+    title = models.CharField(max_length=180, blank=True)
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ("starts_at", "id")
+
+    def __str__(self):
+        return f"{self.kind} {self.course.code} @ {self.hall.name} ({self.starts_at:%Y-%m-%d %H:%M})"
 
 
 class ClassSchedule(TimestampedModel):

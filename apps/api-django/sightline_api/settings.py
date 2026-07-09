@@ -104,6 +104,13 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Faculty at-risk alerts. Console backend prints emails in dev; override via env in prod.
+EMAIL_BACKEND = os.environ.get(
+    "SIGHTLINE_EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend" if DEBUG else "django.core.mail.backends.smtp.EmailBackend",
+)
+DEFAULT_FROM_EMAIL = os.environ.get("SIGHTLINE_DEFAULT_FROM_EMAIL", "sightline@localhost")
+
 # Spill large exam-video uploads to disk early instead of buffering in memory.
 FILE_UPLOAD_MAX_MEMORY_SIZE = int(os.environ.get("SIGHTLINE_FILE_UPLOAD_MAX_MEMORY_SIZE", str(5 * 1024 * 1024)))
 DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.environ.get("SIGHTLINE_DATA_UPLOAD_MAX_MEMORY_SIZE", str(10 * 1024 * 1024)))

@@ -766,8 +766,120 @@ export interface StudentRiskScore {
   risk_level: "low" | "medium" | "high";
   risk_score: number;
   contributing_factors: JsonValue[];
+  features?: Record<string, number>;
   created_at: string;
   updated_at: string;
+}
+
+export interface RiskHeatmapRow {
+  department: string;
+  high: number;
+  medium: number;
+  low: number;
+  count: number;
+  avgRisk: number;
+}
+
+export interface FeatureImportance {
+  key: string;
+  label: string;
+  weight: number;
+}
+
+export interface FeatureImportanceResponse {
+  model: string;
+  generatedAt: string | null;
+  features: FeatureImportance[];
+}
+
+export interface RiskTrendPoint {
+  generatedAt: string;
+  riskScore: number;
+  riskLevel: "low" | "medium" | "high";
+  student: string;
+  course: string;
+}
+
+export interface FacultyActionLogItem {
+  id: number;
+  faculty: number | null;
+  faculty_username?: string;
+  student: number;
+  student_name?: string;
+  student_number?: string;
+  course: number | null;
+  course_code?: string;
+  risk_score: number | null;
+  action: "auto_email" | "email" | "meeting" | "call" | "note";
+  note: string;
+  created_at: string;
+}
+
+export interface StudentRiskDetail {
+  student: {
+    id: number;
+    name: string;
+    studentNumber: string;
+    cohort: string;
+    department: string | null;
+    previousGpa: number;
+  };
+  latest: StudentRiskScore[];
+  featureLabels: Record<string, string>;
+  history: Array<{ generatedAt: string; course: string; riskScore: number; riskLevel: string }>;
+  actions: FacultyActionLogItem[];
+}
+
+export interface ScheduleConflict {
+  type: "room" | "invigilator" | "student";
+  message: string;
+  session_id: number;
+}
+
+export interface ScheduledSession {
+  id: number;
+  kind: "class" | "exam";
+  course: number;
+  course_code?: string;
+  course_title?: string;
+  hall: number;
+  hall_name?: string;
+  invigilator: number | null;
+  invigilator_username?: string;
+  title: string;
+  starts_at: string;
+  ends_at: string;
+  conflicts?: ScheduleConflict[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScheduledSessionPayload {
+  kind: "class" | "exam";
+  course: number;
+  hall: number;
+  invigilator?: number | null;
+  title?: string;
+  starts_at: string;
+  ends_at: string;
+}
+
+export interface StudentScheduleResponse {
+  student: { name: string; studentNumber: string } | null;
+  sessions: ScheduledSession[];
+}
+
+export interface HallOption {
+  id: number;
+  name: string;
+  building: string;
+  capacity: number;
+}
+
+export interface InvigilatorOption {
+  id: number;
+  username: string;
+  email: string;
 }
 
 export interface AtRiskInputRow {
