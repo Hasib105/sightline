@@ -91,6 +91,23 @@ class SightlineApiSmokeTests(TestCase):
         self.assertEqual(second.json()["created"], 0)
         self.assertEqual(NotificationEvent.objects.count(), NotificationEvent.objects.values("idempotency_key").distinct().count())
 
+    def test_auto_generate_schedule_is_conflict_free_and_idempotent(self):
+        from .services import auto_generate_schedule, scheduling_conflicts
+
+        first = auto_generate_schedule(kind="class", days=5)
+        self.assertTrue(first["created"], "expected at least one session to be placed")
+        for session in first["created"]:
+            self.assertEqual(
+                scheduling_conflicts(
+                    session.hall_id, session.starts_at, session.ends_at,
+                    course_id=session.course_id, exclude_id=session.id,
+                ),
+                [],
+            )
+        # re-running the same window creates nothing new (idempotent)
+        second = auto_generate_schedule(kind="class", days=5)
+        self.assertEqual(second["created"], [])
+
     def test_student_can_submit_enrolled_exam_and_update_attempt(self):
         self.assertTrue(self.client.login(username="student", password="sightline"))
         exam = ExamSession.objects.get(course__code="CSE-321")

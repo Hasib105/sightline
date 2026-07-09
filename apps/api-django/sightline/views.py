@@ -13,7 +13,7 @@ from django.db import transaction
 from django.db.models import Avg, Count, Max
 from django.http import JsonResponse, StreamingHttpResponse
 from django.utils import timezone
-from django.utils.dateparse import parse_datetime
+from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -53,6 +53,7 @@ from . import predict
 from .course_rag import answer_course_question, index_course, remove_material_index, stream_course_question_events
 from .services import (
     agenda_for_student,
+    auto_generate_schedule,
     calculate_risk_run,
     generate_due_notifications,
     scheduling_conflicts,
@@ -919,6 +920,32 @@ class ApiV1DispatchView(SessionlessAPIView):
                 exclude_id=data.get("id") or None,
             )
             return Response({"conflicts": conflicts})
+
+        if clean_path == "schedules/generate" and request.method == "POST":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if not has_role(request, UserProfile.ROLE_TEACHER):
+                return Response({"detail": "Only teachers or admins can generate schedules."}, status=status.HTTP_403_FORBIDDEN)
+            data = request.data
+            course_ids = data.get("course_ids") or None
+            if user_role(request) == UserProfile.ROLE_TEACHER and not is_admin_request(request):
+                owned = set(Course.objects.filter(teacher=django_user(request)).values_list("id", flat=True))
+                course_ids = [cid for cid in (course_ids or owned) if cid in owned]
+            result = auto_generate_schedule(
+                kind=data.get("kind") or "class",
+                start_date=parse_date(data["start_date"]) if data.get("start_date") else None,
+                days=int(data.get("days") or 5),
+                course_ids=course_ids,
+            )
+            return Response(
+                {
+                    "created": serializers.ScheduledSessionSerializer(result["created"], many=True).data,
+                    "skipped": result["skipped"],
+                    "detail": result.get("detail"),
+                },
+                status=status.HTTP_201_CREATED,
+            )
 
         if clean_path == "schedules":
             auth_error = self.auth_required(request)

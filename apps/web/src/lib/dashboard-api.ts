@@ -1051,6 +1051,22 @@ export async function checkScheduleConflicts(payload: {
   return parseResponse<{ conflicts: ScheduleConflict[] }>(response);
 }
 
+export async function generateSchedule(payload: {
+  kind?: "class" | "exam";
+  start_date?: string;
+  days?: number;
+  course_ids?: number[];
+}): Promise<{ created: ScheduledSession[]; skipped: { course: string; reason: string }[]; detail?: string | null }> {
+  const response = await apiFetchClient("/api/v1/schedules/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<{ created: ScheduledSession[]; skipped: { course: string; reason: string }[]; detail?: string | null }>(
+    response
+  );
+}
+
 export async function getMySchedule(): Promise<StudentScheduleResponse> {
   const response = await apiFetchClient("/api/v1/schedules/my");
   return parseResponse<StudentScheduleResponse>(response);

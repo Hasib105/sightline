@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, time, timedelta
 
 from django.core.mail import send_mail
 from django.db.models import Sum
@@ -9,9 +10,11 @@ from .models import (
     AssessmentRecord,
     AttendanceRecord,
     ClassSchedule,
+    Course,
     CourseEnrollment,
     ExamSchedule,
     FacultyActionLog,
+    Hall,
     NotificationEvent,
     ReminderRule,
     RiskAssessmentRun,
@@ -238,6 +241,73 @@ def sessions_for_student(student, start=None, end=None):
     if end:
         queryset = queryset.filter(starts_at__lte=end)
     return queryset
+
+
+# Daily start times for auto-generated sittings (lunch 12:00-13:00 left free).
+_AUTO_SLOTS = [time(9, 0), time(10, 30), time(13, 0), time(14, 30), time(16, 0)]
+_AUTO_SLOT_MINUTES = 90
+
+
+def auto_generate_schedule(kind=ScheduledSession.KIND_CLASS, start_date=None, days=5, course_ids=None):
+    """Greedily place one conflict-free sitting per course into free hall/time slots.
+
+    Walks each course against a weekday grid of slots and halls, reusing
+    scheduling_conflicts (room + invigilator + student clashes). First slot that
+    clears wins. Courses already scheduled for this kind in the window are skipped,
+    so re-running is idempotent rather than piling on duplicates.
+    """
+    # ponytail: one sitting per course, first-fit. Add weekly recurrence / capacity-vs-enrollment fit when timetables need more.
+    start_date = start_date or timezone.localdate()
+    tz = timezone.get_current_timezone()
+    halls = list(Hall.objects.order_by("-capacity", "name"))
+    if not halls:
+        return {"created": [], "skipped": [], "detail": "No halls available. Seed halls first."}
+
+    courses = Course.objects.all()
+    if course_ids:
+        courses = courses.filter(id__in=course_ids)
+
+    window_start = timezone.make_aware(datetime.combine(start_date, time.min), tz)
+    window_end = window_start + timedelta(days=days)
+
+    created, skipped = [], []
+    for course in courses.order_by("code"):
+        if ScheduledSession.objects.filter(
+            course=course, kind=kind, starts_at__gte=window_start, starts_at__lt=window_end
+        ).exists():
+            skipped.append({"course": course.code, "reason": "already scheduled in this window"})
+            continue
+
+        placed = False
+        for day in range(days):
+            date = start_date + timedelta(days=day)
+            if date.weekday() >= 5:  # skip Sat/Sun
+                continue
+            for slot in _AUTO_SLOTS:
+                starts_at = timezone.make_aware(datetime.combine(date, slot), tz)
+                ends_at = starts_at + timedelta(minutes=_AUTO_SLOT_MINUTES)
+                for hall in halls:
+                    if not scheduling_conflicts(hall.id, starts_at, ends_at, course_id=course.id):
+                        created.append(
+                            ScheduledSession.objects.create(
+                                kind=kind,
+                                course=course,
+                                hall=hall,
+                                title=f"{course.code} {dict(ScheduledSession.KIND_CHOICES).get(kind, kind)}",
+                                starts_at=starts_at,
+                                ends_at=ends_at,
+                            )
+                        )
+                        placed = True
+                        break
+                if placed:
+                    break
+            if placed:
+                break
+        if not placed:
+            skipped.append({"course": course.code, "reason": "no conflict-free slot in window"})
+
+    return {"created": created, "skipped": skipped}
 
 
 # ---------------------------------------------------------------------------

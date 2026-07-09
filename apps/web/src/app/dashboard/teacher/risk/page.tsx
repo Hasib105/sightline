@@ -112,6 +112,27 @@ export default function TeacherRiskPage() {
     },
   });
 
+  async function handleCsvFiles(files: FileList | null) {
+    if (!files || files.length === 0) {
+      return;
+    }
+    const chunks: string[] = [];
+    for (const file of Array.from(files)) {
+      const lines = (await file.text())
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      // Drop a header row: a data row's 2nd column (attended) is numeric; a header's is not.
+      if (lines.length > 0 && /[a-zA-Z]/.test(lines[0].split(",")[1] ?? "")) {
+        lines.shift();
+      }
+      chunks.push(lines.join("\n"));
+    }
+    setRowsText((prev) => [prev.trim(), ...chunks].filter(Boolean).join("\n"));
+    setSourceName(files.length === 1 ? files[0].name : `${files.length} csv files`);
+    setMessage(`Loaded ${files.length} CSV file(s). Review the rows below, then run analysis.`);
+  }
+
   return (
     <ConsolePage
       eyebrow="Teacher"
@@ -186,6 +207,19 @@ export default function TeacherRiskPage() {
             <div className="space-y-2">
               <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Source name</label>
               <input className={consoleInputClass} value={sourceName} onChange={(event) => setSourceName(event.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Upload CSV (one or more)</label>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                multiple
+                className={`${consoleInputClass} cursor-pointer file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-[var(--dashboard-panel-muted)] file:px-2 file:py-1 file:text-xs`}
+                onChange={(event) => handleCsvFiles(event.target.files)}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Columns: student_number, attended, total, score, max_score. A header row is optional and detected automatically.
+              </p>
             </div>
             <div className="space-y-2">
               <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Rows</label>

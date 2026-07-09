@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CalendarClock, Loader2, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, CalendarClock, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 
 import {
   ConsoleEmptyState,
@@ -19,6 +19,7 @@ import {
   checkScheduleConflicts,
   createSchedule,
   deleteSchedule,
+  generateSchedule,
   listCourses,
   listHalls,
   listInvigilators,
@@ -45,6 +46,7 @@ export default function SchedulingPage() {
 
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState<string | null>(null);
+  const [genForm, setGenForm] = useState({ kind: "class" as "class" | "exam", start_date: "", days: "5" });
 
   const schedules = useMemo(() => schedulesQuery.data ?? [], [schedulesQuery.data]);
   const courseOptions = (coursesQuery.data ?? []).map((c) => ({ value: String(c.id), label: `${c.code} · ${c.title}` }));
@@ -91,6 +93,23 @@ export default function SchedulingPage() {
       await queryClient.invalidateQueries({ queryKey: ["schedules"] });
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : "Unable to create schedule."),
+  });
+
+  const generateMutation = useMutation({
+    mutationFn: () =>
+      generateSchedule({
+        kind: genForm.kind,
+        start_date: genForm.start_date || undefined,
+        days: Number(genForm.days) || 5,
+      }),
+    onSuccess: async (result) => {
+      const parts = [`Placed ${result.created.length} session(s)`];
+      if (result.skipped.length) parts.push(`skipped ${result.skipped.length}`);
+      if (result.detail) parts.push(result.detail);
+      setMessage(parts.join(" · "));
+      await queryClient.invalidateQueries({ queryKey: ["schedules"] });
+    },
+    onError: (error) => setMessage(error instanceof Error ? error.message : "Unable to generate schedule."),
   });
 
   const deleteMutation = useMutation({
@@ -163,6 +182,44 @@ export default function SchedulingPage() {
             )}
           </ConsolePanel>
 
+          <div className="space-y-3">
+          <ConsolePanel title="Auto-generate (AI)" description="Place one conflict-free sitting per course across free rooms and slots." contentClassName="space-y-3">
+            <DashboardSelect
+              value={genForm.kind}
+              onValueChange={(value) => setGenForm((prev) => ({ ...prev, kind: value as "class" | "exam" }))}
+              options={[
+                { value: "class", label: "Class" },
+                { value: "exam", label: "Exam" },
+              ]}
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">From (optional)</label>
+                <input
+                  type="date"
+                  className={consoleInputClass}
+                  value={genForm.start_date}
+                  onChange={(event) => setGenForm((prev) => ({ ...prev, start_date: event.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Days</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={30}
+                  className={consoleInputClass}
+                  value={genForm.days}
+                  onChange={(event) => setGenForm((prev) => ({ ...prev, days: event.target.value }))}
+                />
+              </div>
+            </div>
+            <Button size="sm" variant="secondary" onClick={() => generateMutation.mutate()} disabled={generateMutation.isPending}>
+              {generateMutation.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+              Auto-generate schedule
+            </Button>
+          </ConsolePanel>
+
           <ConsolePanel title="New session" description="Room + invigilator with live conflict check." contentClassName="space-y-3">
             <DashboardSelect
               value={form.kind}
@@ -229,6 +286,7 @@ export default function SchedulingPage() {
               Schedule session
             </Button>
           </ConsolePanel>
+          </div>
         </div>
       )}
     </ConsolePage>
