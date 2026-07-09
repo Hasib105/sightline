@@ -253,13 +253,21 @@ def default_hall():
 
 
 def _save_uploaded_file(storage_name: str, upload) -> str:
-    if hasattr(upload, "chunks"):
-        with default_storage.open(storage_name, "wb") as destination:
-            for chunk in upload.chunks():
-                if chunk:
-                    destination.write(chunk)
-        return storage_name
-    return default_storage.save(storage_name, upload)
+    if not hasattr(upload, "chunks"):
+        return default_storage.save(storage_name, upload)
+
+    directory = Path(storage_name).parent.as_posix()
+    if directory not in {"", "."}:
+        try:
+            Path(default_storage.path(directory)).mkdir(parents=True, exist_ok=True)
+        except NotImplementedError:
+            return default_storage.save(storage_name, upload)
+
+    with default_storage.open(storage_name, "wb") as destination:
+        for chunk in upload.chunks():
+            if chunk:
+                destination.write(chunk)
+    return storage_name
 
 
 def default_upload_exam_session():
