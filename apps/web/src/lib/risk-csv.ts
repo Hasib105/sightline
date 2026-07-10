@@ -26,7 +26,7 @@ export function parseRiskCsv(text: string, sourceName = "upload.csv"): { sourceN
       total: numericValues[1],
       score: numericValues[2],
       max_score: numericValues[3],
-      label: sourceName,
+      label: "Quiz 1",
     });
   }
 

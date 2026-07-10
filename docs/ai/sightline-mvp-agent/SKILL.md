@@ -95,9 +95,11 @@ The seed command should create:
 - 1 admin
 - 3 invigilators
 - 5 teachers
-- 35 students
+- 12 students enrolled across 10 MVP courses
 
 Default demo password: `sightline`.
+
+Each seeded course includes unit notes, course guide material, and one exam with 5–7 quiz questions.
 
 Run seed with:
 

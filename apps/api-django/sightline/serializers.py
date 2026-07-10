@@ -742,7 +742,7 @@ class AtRiskRunSerializer(serializers.Serializer):
                 source_import=record_import,
                 student=student,
                 course=course,
-                label=assessment.get("label", row.get("label", "Assessment")),
+                label=assessment.get("label", row.get("label", "Quiz 1")),
                 score=assessment.get("score", row.get("score", 0)),
                 max_score=max(assessment.get("max_score", row.get("max_score", row.get("maxScore", 100))), 1),
             )

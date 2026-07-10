@@ -85,6 +85,8 @@ def extract_student_features(student, course):
             assignments.append(ratio)
         elif "participation" in label:
             features["participation_score"] = ratio
+        else:
+            quizzes.append(ratio)
 
     if quizzes:
         features["quiz_avg"] = sum(quizzes) / len(quizzes)

@@ -37,6 +37,8 @@ from sightline.models import (
 )
 from sightline.services import calculate_risk_run, generate_due_notifications
 
+from .mvp_seed_catalog import MVP_COURSE_SPECS, MVP_STUDENT_COUNT, MVP_STUDENT_NAMES
+
 
 PYTHON_COURSE_CODE = "PY-101"
 PYTHON_COURSE_TITLE = "Python"
@@ -450,20 +452,84 @@ def _python_unit_material_text(order, unit):
     return "\n".join(lines)
 
 
-def _python_exam_questions():
+def _python_mvp_exam_questions():
     questions = []
-    for unit_index, unit in enumerate(PYTHON_UNITS, start=1):
-        for question_index, question in enumerate(unit["quiz"], start=1):
-            payload = {
-                "id": f"u{unit_index:02d}-q{question_index}",
-                "unit": unit_index,
-                "kind": question["kind"],
-                "prompt": f"Unit {unit_index} ({unit['title']}): {question['prompt']}",
-            }
-            if question.get("options"):
-                payload["options"] = question["options"]
-            questions.append(payload)
+    for unit_index, unit in enumerate(PYTHON_UNITS[:6], start=1):
+        question = unit["quiz"][0]
+        payload = {
+            "id": f"u{unit_index:02d}-q1",
+            "unit": unit_index,
+            "kind": question["kind"],
+            "prompt": f"Unit {unit_index} ({unit['title']}): {question['prompt']}",
+        }
+        if question.get("options"):
+            payload["options"] = question["options"]
+        questions.append(payload)
     return questions
+
+
+def _catalog_unit_text(order: int, unit: dict) -> str:
+    lines = [
+        f"Unit {order}: {unit['title']}",
+        f"Summary: {unit['summary']}",
+        f"Study focus: {unit['focus']}",
+        "",
+        "Key outcomes:",
+        "- Connect definitions to worked examples from lectures and labs.",
+        "- Practice short-answer explanations without relying on memorized jargon alone.",
+        "- Review the unit summary before attempting the course quiz questions.",
+    ]
+    return "\n".join(lines)
+
+
+def _seed_catalog_course(course, spec: dict) -> None:
+    if spec.get("use_python_units"):
+        _seed_python_course_materials(course)
+        return
+
+    CourseMaterial.objects.update_or_create(
+        course=course,
+        unit=None,
+        title=f"{course.code} course guide",
+        defaults={
+            "uploaded_by": course.teacher,
+            "kind": CourseMaterial.KIND_DOC,
+            "description": f"Overview, outcomes, and study plan for {course.title}.",
+            "content_text": (
+                f"# {course.code} {course.title}\n\n"
+                f"This seeded course includes {len(spec['units'])} units with lecture notes and a "
+                f"{len(spec['exam_questions'])}-question practice quiz for MVP testing."
+            ),
+            "uri": "",
+            "original_filename": f"{course.code.lower()}-guide.md",
+            "order": 0,
+        },
+    )
+    for order, unit_data in enumerate(spec["units"], start=1):
+        unit, _ = CourseUnit.objects.update_or_create(
+            course=course,
+            order=order,
+            defaults={"title": unit_data["title"], "summary": unit_data["summary"]},
+        )
+        CourseMaterial.objects.update_or_create(
+            course=course,
+            unit=unit,
+            title=f"Unit {order}: {unit_data['title']} notes",
+            defaults={
+                "uploaded_by": course.teacher,
+                "kind": CourseMaterial.KIND_TEXT,
+                "description": "Seeded unit notes for course chat, review, and exam preparation.",
+                "content_text": _catalog_unit_text(order, unit_data),
+                "uri": "",
+                "order": order,
+            },
+        )
+
+
+def _exam_questions_for_spec(spec: dict) -> list[dict]:
+    if spec.get("use_python_units"):
+        return _python_mvp_exam_questions()
+    return spec["exam_questions"]
 
 
 def _seed_python_course_materials(course):
@@ -525,26 +591,9 @@ class Command(BaseCommand):
             semester.starts_on = date(2026, 1, 15)
             semester.ends_on = date(2026, 4, 30)
             semester.save(update_fields=["starts_on", "ends_on", "updated_at"])
-        algorithms, _ = Course.objects.get_or_create(
-            semester=semester,
-            code="CSE-321",
-            defaults={"department": cse, "title": "Algorithms"},
-        )
-        databases, _ = Course.objects.get_or_create(
-            semester=semester,
-            code="CSE-335",
-            defaults={"department": cse, "title": "Database Systems"},
-        )
-        circuits, _ = Course.objects.get_or_create(
-            semester=semester,
-            code="EEE-210",
-            defaults={"department": eee, "title": "Circuit Analysis"},
-        )
-        python_course, _ = Course.objects.update_or_create(
-            semester=semester,
-            code=PYTHON_COURSE_CODE,
-            defaults={"department": cse, "title": PYTHON_COURSE_TITLE},
-        )
+
+        mvp_codes = {spec["code"] for spec in MVP_COURSE_SPECS}
+        Course.objects.filter(semester=semester).exclude(code__in=mvp_codes).delete()
 
         user_specs = [
             ("admin", "Asha", "Admin", UserProfile.ROLE_ADMIN),
@@ -565,46 +614,7 @@ class Command(BaseCommand):
                     "Student",
                     UserProfile.ROLE_STUDENT,
                 )
-                for index, first_name in enumerate(
-                    [
-                        "Samir",
-                        "Nadia",
-                        "Kabir",
-                        "Meera",
-                        "Rafi",
-                        "Ayesha",
-                        "Sadia",
-                        "Hasan",
-                        "Mitu",
-                        "Robin",
-                        "Nusrat",
-                        "Fahim",
-                        "Joya",
-                        "Arif",
-                        "Maliha",
-                        "Rupa",
-                        "Sakib",
-                        "Farhan",
-                        "Lamia",
-                        "Sohan",
-                        "Tanisha",
-                        "Imran",
-                        "Priya",
-                        "Kamal",
-                        "Shila",
-                        "Omar",
-                        "Dipa",
-                        "Rashed",
-                        "Nila",
-                        "Sajid",
-                        "Pori",
-                        "Habib",
-                        "Tisha",
-                        "Noman",
-                        "Rina",
-                    ],
-                    start=1,
-                )
+                for index, first_name in enumerate(MVP_STUDENT_NAMES, start=1)
             ]
         )
         desired_usernames = {username for username, *_ in user_specs}
@@ -621,49 +631,29 @@ class Command(BaseCommand):
                 defaults={"department": cse, "full_name": user.get_full_name() or user.username},
             )
 
-        course_teacher_pairs = [
-            (algorithms, users["teacher"]),
-            (databases, users["teacher2"]),
-            (circuits, users["teacher3"]),
-            (python_course, users["teacher4"]),
-        ]
-        for course, teacher in course_teacher_pairs:
-            course.teacher = teacher
+        dept_by_code = {"CSE": cse, "EEE": eee}
+        seeded_courses = []
+        course_by_code = {}
+        for spec in MVP_COURSE_SPECS:
+            course, _ = Course.objects.update_or_create(
+                semester=semester,
+                code=spec["code"],
+                defaults={
+                    "department": dept_by_code[spec["dept"]],
+                    "title": spec["title"],
+                    "teacher": users[spec["teacher_key"]],
+                },
+            )
+            course.teacher = users[spec["teacher_key"]]
             course.save(update_fields=["teacher", "updated_at"])
+            _seed_catalog_course(course, spec)
+            seeded_courses.append(course)
+            course_by_code[spec["code"]] = course
 
-        for course, unit_rows in {
-            algorithms: [
-                ("Algorithm foundations", "Growth rates, correctness, and the shape of efficient problem solving."),
-                ("Graph traversal", "Breadth-first and depth-first search with practical traversal examples."),
-                ("Dynamic programming", "Breaking overlapping subproblems into reusable state transitions."),
-            ],
-            databases: [
-                ("Relational model", "Tables, keys, relationships, and normalization basics."),
-                ("SQL querying", "Filtering, grouping, joining, and query performance."),
-            ],
-        }.items():
-            for order, (title, summary) in enumerate(unit_rows, start=1):
-                unit, _ = CourseUnit.objects.update_or_create(
-                    course=course,
-                    order=order,
-                    defaults={"title": title, "summary": summary},
-                )
-                CourseMaterial.objects.update_or_create(
-                    course=course,
-                    unit=unit,
-                    title=f"{title} notes",
-                    defaults={
-                        "uploaded_by": course.teacher,
-                        "kind": CourseMaterial.KIND_TEXT,
-                        "description": "Seeded unit notes for course chat and student review.",
-                        "content_text": summary
-                        + " Students should connect definitions to examples and be ready to explain the main idea in short answers.",
-                        "uri": "",
-                        "order": 1,
-                    },
-                )
-
-        _seed_python_course_materials(python_course)
+        algorithms = course_by_code["CSE-321"]
+        databases = course_by_code["CSE-335"]
+        circuits = course_by_code["EEE-210"]
+        python_course = course_by_code[PYTHON_COURSE_CODE]
 
         hall_a, _ = Hall.objects.get_or_create(name="Hall A", defaults={"building": "Academic Block", "capacity": 96})
         hall_b, _ = Hall.objects.get_or_create(name="Hall B", defaults={"building": "Engineering Annex", "capacity": 64})
@@ -673,59 +663,6 @@ class Command(BaseCommand):
                 defaults={"building": "Main Campus", "capacity": 48 + (room_number % 5) * 8},
             )
 
-        extra_course_titles = [
-            "Operating Systems",
-            "Computer Networks",
-            "Software Engineering",
-            "Machine Learning",
-            "Web Technologies",
-            "Discrete Mathematics",
-            "Digital Logic Design",
-            "Signals and Systems",
-            "Power Electronics",
-            "Control Systems",
-            "Data Mining",
-            "Cloud Computing",
-            "Mobile Application Development",
-            "Compiler Design",
-            "Computer Graphics",
-            "Information Security",
-            "Embedded Systems",
-            "Microprocessors",
-            "Numerical Methods",
-            "Linear Algebra",
-            "Probability and Statistics",
-            "Technical Communication",
-            "Professional Ethics",
-            "Project Management",
-            "Research Methods",
-            "Distributed Systems",
-            "Human Computer Interaction",
-            "Robotics Fundamentals",
-            "VLSI Design",
-            "Wireless Communication",
-            "Renewable Energy Systems",
-            "Industrial Electronics",
-            "Object Oriented Programming",
-            "Structured Programming",
-            "Theory of Computation",
-        ]
-        dept_cycle = [cse, eee, cse, cse, eee]
-        teacher_users = [users["teacher"], users["teacher2"], users["teacher3"], users["teacher4"], users["teacher5"]]
-        seeded_courses = [algorithms, databases, circuits, python_course]
-        for index, title in enumerate(extra_course_titles, start=1):
-            dept = dept_cycle[index % len(dept_cycle)]
-            prefix = dept.code
-            code = f"{prefix}-{200 + index}"
-            course, _ = Course.objects.get_or_create(
-                semester=semester,
-                code=code,
-                defaults={"department": dept, "title": title, "teacher": teacher_users[index % len(teacher_users)]},
-            )
-            if not course.teacher_id:
-                course.teacher = teacher_users[index % len(teacher_users)]
-                course.save(update_fields=["teacher", "updated_at"])
-            seeded_courses.append(course)
         for label in ["A1", "A2", "A3", "B1", "B2", "B3"]:
             Seat.objects.get_or_create(hall=hall_a, label=label, defaults={"region": f"Desk cluster {label[0]}"})
         for label in ["C1", "C2", "C3"]:
@@ -768,91 +705,47 @@ class Command(BaseCommand):
             starts_at=now - timezone.timedelta(minutes=20),
             defaults={"ends_at": now + timezone.timedelta(minutes=100), "status": ExamSession.STATUS_LIVE},
         )
-        live_exam.quiz_title = "Secure Browser Demo Quiz"
+        algorithms_spec = next(item for item in MVP_COURSE_SPECS if item["code"] == "CSE-321")
+        live_exam.quiz_title = algorithms_spec["exam_title"]
         live_exam.quiz_instructions = "Answer each question and submit the monitored attempt."
-        live_exam.quiz_questions = [
-            {
-                "id": "q1",
-                "kind": "single_choice",
-                "prompt": "Which browser API can detect whether the quiz tab is no longer visible?",
-                "options": ["Clipboard API", "Tab Visibility API", "Notification API", "Web Speech API"],
-            },
-            {
-                "id": "q2",
-                "kind": "single_choice",
-                "prompt": "Which monitoring cadence does this ProcBot demo use?",
-                "options": [
-                    "Tab switch realtime, face every 1 second, phone every 1 second",
-                    "Everything runs every 1 second",
-                    "Face and phone detection run only on submit",
-                    "Manual instructor review only",
-                ],
-            },
-            {
-                "id": "q3",
-                "kind": "single_choice",
-                "prompt": "A webcam sample reports zero faces for several checks. Which anomaly should be classified?",
-                "options": ["TabSwitch", "MultiPerson", "FaceGone", "NetworkIdle"],
-            },
-            {
-                "id": "q4",
-                "kind": "short_answer",
-                "prompt": "Describe why evidence screenshots help an instructor review alerts.",
-            },
-        ]
+        live_exam.quiz_questions = _exam_questions_for_spec(algorithms_spec)
         live_exam.save(update_fields=["quiz_title", "quiz_instructions", "quiz_questions", "updated_at"])
-        database_exam, _ = ExamSession.objects.get_or_create(
-            course=databases,
-            hall=hall_b,
-            starts_at=now + timezone.timedelta(days=2),
-            defaults={"ends_at": now + timezone.timedelta(days=2, hours=2), "status": ExamSession.STATUS_PREPARED},
-        )
-        database_exam.quiz_title = "Database Systems Quiz"
-        database_exam.quiz_instructions = "Teacher-created sample quiz for enrolled students."
-        database_exam.quiz_questions = [
-            {
-                "id": "q1",
-                "kind": "single_choice",
-                "prompt": "Which SQL clause filters grouped rows after aggregation?",
-                "options": ["WHERE", "HAVING", "ORDER BY", "JOIN"],
-            },
-            {
-                "id": "q2",
-                "kind": "short_answer",
-                "prompt": "Explain one reason database indexes can improve query performance.",
-            },
-        ]
-        database_exam.save(update_fields=["quiz_title", "quiz_instructions", "quiz_questions", "updated_at"])
 
-        python_exam = ExamSession.objects.filter(course=python_course, quiz_title=PYTHON_QUIZ_TITLE).order_by("id").first()
-        if python_exam is None:
-            python_exam = ExamSession.objects.create(
-                course=python_course,
-                hall=hall_a,
-                starts_at=now + timezone.timedelta(days=4),
-                ends_at=now + timezone.timedelta(days=4, hours=2),
-                status=ExamSession.STATUS_PREPARED,
-                quiz_title=PYTHON_QUIZ_TITLE,
+        exam_halls = [hall_a, hall_b] + list(Hall.objects.filter(name__startswith="Room ").order_by("name")[:8])
+        for index, spec in enumerate(MVP_COURSE_SPECS):
+            if spec["code"] == "CSE-321":
+                continue
+            course = course_by_code[spec["code"]]
+            hall = exam_halls[index % len(exam_halls)]
+            exam, _ = ExamSession.objects.update_or_create(
+                course=course,
+                quiz_title=spec["exam_title"],
+                defaults={
+                    "hall": hall,
+                    "starts_at": now + timezone.timedelta(days=2 + index),
+                    "ends_at": now + timezone.timedelta(days=2 + index, hours=2),
+                    "status": ExamSession.STATUS_PREPARED,
+                    "quiz_instructions": f"Seeded {len(_exam_questions_for_spec(spec))}-question quiz for {course.code}.",
+                    "quiz_questions": _exam_questions_for_spec(spec),
+                },
             )
-        python_exam.hall = hall_a
-        python_exam.starts_at = now + timezone.timedelta(days=4)
-        python_exam.ends_at = now + timezone.timedelta(days=4, hours=2)
-        python_exam.status = ExamSession.STATUS_PREPARED
-        python_exam.quiz_title = PYTHON_QUIZ_TITLE
-        python_exam.quiz_instructions = PYTHON_QUIZ_INSTRUCTIONS
-        python_exam.quiz_questions = _python_exam_questions()
-        python_exam.save(
-            update_fields=[
-                "hall",
-                "starts_at",
-                "ends_at",
-                "status",
-                "quiz_title",
-                "quiz_instructions",
-                "quiz_questions",
-                "updated_at",
-            ]
-        )
+            exam.hall = hall
+            exam.starts_at = now + timezone.timedelta(days=2 + index)
+            exam.ends_at = now + timezone.timedelta(days=2 + index, hours=2)
+            exam.status = ExamSession.STATUS_PREPARED
+            exam.quiz_instructions = f"Seeded {len(_exam_questions_for_spec(spec))}-question quiz for {course.code}."
+            exam.quiz_questions = _exam_questions_for_spec(spec)
+            exam.save(
+                update_fields=[
+                    "hall",
+                    "starts_at",
+                    "ends_at",
+                    "status",
+                    "quiz_instructions",
+                    "quiz_questions",
+                    "updated_at",
+                ]
+            )
 
         def _profile(index):
             # Deterministic per-student ability (0.25-0.94) and grade trend direction.
@@ -865,7 +758,9 @@ class Command(BaseCommand):
 
         students = []
         student_index = {}
-        for index in range(1, 36):
+        mvp_student_numbers = {f"S-{1000 + index}" for index in range(1, MVP_STUDENT_COUNT + 1)}
+        StudentProfile.objects.exclude(student_number__in=mvp_student_numbers).delete()
+        for index in range(1, MVP_STUDENT_COUNT + 1):
             username = "student" if index == 1 else f"student{index:02d}"
             user = users[username]
             number = f"S-{1000 + index}"
@@ -876,20 +771,14 @@ class Command(BaseCommand):
                     "user": user,
                     "department": cse,
                     "full_name": f"{user.first_name} Student",
-                    "cohort": "2023-CSE-A" if index <= 18 else "2023-CSE-B",
+                    "cohort": "2023-CSE-A" if index <= 6 else "2023-CSE-B",
                     "previous_gpa": Decimal(str(round(1.3 + ability * 2.6, 2))),
                 },
             )
             students.append(student)
             student_index[student.id] = index
 
-        # Enroll students across courses so every department has risk data.
-        enrollment_map = {
-            algorithms: students,
-            python_course: students,
-            databases: [s for i, s in enumerate(students, start=1) if i % 2 == 0],
-            circuits: [s for i, s in enumerate(students, start=1) if i % 2 == 1],
-        }
+        enrollment_map = {course: students for course in seeded_courses}
         for course, enrolled in enrollment_map.items():
             for student in enrolled:
                 CourseEnrollment.objects.update_or_create(
@@ -897,12 +786,13 @@ class Command(BaseCommand):
                     student=student,
                     defaults={"status": CourseEnrollment.STATUS_ACTIVE},
                 )
-
-        course_teacher = dict(course_teacher_pairs)
+        CourseEnrollment.objects.filter(course__semester=semester).exclude(
+            course__code__in=mvp_codes
+        ).delete()
 
         def _seed_course_history(course, enrolled):
             """Three dated runs of attendance + quizzes + midterm + assignments + participation."""
-            uploaded_by = course_teacher.get(course, users["teacher"])
+            uploaded_by = course.teacher or users["teacher"]
             jitter = (sum(ord(c) for c in course.code) % 11 - 5) / 100.0  # stable per-course offset
             for round_index, week in enumerate([4, 8, 12]):
                 ts = now - timezone.timedelta(weeks=(12 - week))
@@ -955,6 +845,10 @@ class Command(BaseCommand):
         if not RiskAssessmentRun.objects.exists():
             for course, enrolled in enrollment_map.items():
                 _seed_course_history(course, enrolled)
+
+        ExamSession.objects.filter(course__semester=semester).exclude(
+            quiz_title__in=[spec["exam_title"] for spec in MVP_COURSE_SPECS]
+        ).delete()
 
         if not AlertEvent.objects.exists():
             alert = AlertEvent.objects.create(
@@ -1030,10 +924,10 @@ class Command(BaseCommand):
             monday = monday.replace(hour=9, minute=0, second=0, microsecond=0)
             invigilators = [users["invigilator"], users["invigilator2"], users["invigilator3"]]
             course_schedule = [
-                (algorithms, hall_a, [(0, 9), (2, 9)], 10, 10),   # (day_offset, hour) class slots; exam day/hour
-                (databases, hall_a, [(0, 11), (3, 11)], 11, 9),
-                (circuits, hall_b, [(1, 9), (3, 9)], 12, 9),
-                (python_course, hall_b, [(1, 13), (4, 13)], 13, 13),
+                (course_by_code["CSE-321"], hall_a, [(0, 9), (2, 9)], 10, 10),
+                (course_by_code["CSE-335"], hall_a, [(0, 11), (3, 11)], 11, 9),
+                (course_by_code["EEE-210"], hall_b, [(1, 9), (3, 9)], 12, 9),
+                (course_by_code[PYTHON_COURSE_CODE], hall_b, [(1, 13), (4, 13)], 13, 13),
             ]
             for slot, (course, hall, class_slots, exam_day, exam_hour) in enumerate(course_schedule):
                 for day_offset, hour in class_slots:
@@ -1089,16 +983,17 @@ class Command(BaseCommand):
                 },
             )
 
-        python_indexed_chunks = None
+        indexed_chunks = 0
         if not options.get("skip_vector_index"):
             try:
                 from sightline.course_rag import index_course  # lazy: avoids LLM stack when skipped
 
-                python_indexed_chunks = index_course(python_course)
+                for course in seeded_courses:
+                    indexed_chunks += index_course(course) or 0
             except Exception as exc:
                 self.stderr.write(
                     self.style.WARNING(
-                        f"Python course data was created, but vector indexing failed: {exc}"
+                        f"Course data was created, but vector indexing failed: {exc}"
                     )
                 )
 
@@ -1111,18 +1006,19 @@ class Command(BaseCommand):
                 UserProfile.ROLE_STUDENT,
             ]
         }
+        exam_count = ExamSession.objects.filter(course__code__in=mvp_codes).count()
         self.stdout.write(
             self.style.SUCCESS(
                 "Sightline demo data is ready: "
                 f"{role_counts[UserProfile.ROLE_ADMIN]} admin, "
                 f"{role_counts[UserProfile.ROLE_INVIGILATOR]} invigilators, "
                 f"{role_counts[UserProfile.ROLE_TEACHER]} teachers, "
-                f"{role_counts[UserProfile.ROLE_STUDENT]} students. "
-                f"Python course: {len(PYTHON_UNITS)} units, {len(_python_exam_questions())} quiz questions"
+                f"{role_counts[UserProfile.ROLE_STUDENT]} students, "
+                f"{len(seeded_courses)} courses, {exam_count} exams."
                 + (
-                    f", {python_indexed_chunks} indexed chunks."
-                    if python_indexed_chunks is not None
-                    else "."
+                    f" Indexed chunks: {indexed_chunks}."
+                    if indexed_chunks
+                    else ""
                 )
             )
         )
