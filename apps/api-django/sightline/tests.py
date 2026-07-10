@@ -812,7 +812,7 @@ class SightlineApiSmokeTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(bulk_response.status_code, 201)
-        self.assertEqual(len(bulk_response.json()), 1)
+        self.assertEqual(len(bulk_response.json()), len(suggestions))
         self.assertTrue(ScheduledSession.objects.filter(course=course, hall_id=suggestions[0]["hall"]).exists())
 
     def test_teacher_can_reset_risk_data_and_reupload(self):
