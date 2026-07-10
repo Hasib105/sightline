@@ -842,6 +842,40 @@ class SightlineApiSmokeTests(TestCase):
         self.assertGreater(generate_response.json()["count"], 0)
         self.assertLess(elapsed, 30, "Semester schedule generation should finish within 30 seconds")
 
+    def test_admin_can_bulk_create_semester_schedule_quickly(self):
+        self.assertTrue(self.client.login(username="admin", password="sightline"))
+        ScheduledSession.objects.all().delete()
+        course_ids = list(Course.objects.values_list("id", flat=True))
+
+        generate_response = self.client.post(
+            "/api/v1/schedules/generate",
+            data={
+                "courses": course_ids,
+                "term_start": "2026-01-15",
+                "term_end": "2026-04-30",
+                "kind": "class",
+                "teaching_weekdays": [0, 1, 2, 3],
+                "weekend_days": [4, 5],
+                "classes_per_week": 3,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(generate_response.status_code, 200)
+        suggestions = generate_response.json()["suggestions"]
+        self.assertGreater(len(suggestions), 50)
+
+        started = time.monotonic()
+        bulk_response = self.client.post(
+            "/api/v1/schedules/bulk",
+            data={"sessions": suggestions},
+            content_type="application/json",
+        )
+        elapsed = time.monotonic() - started
+
+        self.assertEqual(bulk_response.status_code, 201)
+        self.assertEqual(len(bulk_response.json()), len(suggestions))
+        self.assertLess(elapsed, 20, "Bulk schedule apply should finish within 20 seconds")
+
     def test_teacher_can_delete_own_schedule_but_not_other_teachers(self):
         self.assertTrue(self.client.login(username="teacher", password="sightline"))
         own_course = Course.objects.get(code="CSE-321")

@@ -399,7 +399,11 @@ class ScheduleBulkView(SessionlessAPIView):
                 return Response({"detail": "Teachers can only schedule their own courses."}, status=status.HTTP_403_FORBIDDEN)
         created = bulk_create_scheduled_sessions(request, sessions)
         return Response(
-            serializers.ScheduledSessionSerializer(created, many=True).data,
+            serializers.ScheduledSessionSerializer(
+                created,
+                many=True,
+                context={"include_conflicts": False},
+            ).data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -1250,7 +1254,11 @@ class ApiV1DispatchView(SessionlessAPIView):
             serializer.is_valid(raise_exception=True)
             created = bulk_create_scheduled_sessions(request, serializer.validated_data["sessions"])
             return Response(
-                serializers.ScheduledSessionSerializer(created, many=True).data,
+                serializers.ScheduledSessionSerializer(
+                    created,
+                    many=True,
+                    context={"include_conflicts": False},
+                ).data,
                 status=status.HTTP_201_CREATED,
             )
 

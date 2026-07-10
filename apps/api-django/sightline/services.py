@@ -906,11 +906,13 @@ def generate_schedule_plan(
 
 def bulk_create_scheduled_sessions(request, session_items):
     """Create multiple scheduled sessions from validated dict payloads."""
+    from django.db import transaction
     from django.utils.dateparse import parse_datetime
 
     from . import serializers as app_serializers
+    from .models import ScheduledSession
 
-    created = []
+    pending = []
     allowed_fields = {"kind", "course", "hall", "invigilator", "title", "starts_at", "ends_at"}
     for item in session_items:
         clean_item = {key: value for key, value in item.items() if key in allowed_fields}
@@ -923,8 +925,13 @@ def bulk_create_scheduled_sessions(request, session_items):
                     clean_item[field] = parsed
         session_serializer = app_serializers.ScheduledSessionSerializer(data=clean_item)
         session_serializer.is_valid(raise_exception=True)
-        created.append(session_serializer.save())
-    return created
+        pending.append(ScheduledSession(**session_serializer.validated_data))
+
+    if not pending:
+        return []
+
+    with transaction.atomic():
+        return ScheduledSession.objects.bulk_create(pending, batch_size=500)
 
 
 def clear_scheduled_sessions(course_ids=None, teacher_user=None, admin=False):

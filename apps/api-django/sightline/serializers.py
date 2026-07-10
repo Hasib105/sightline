@@ -853,6 +853,8 @@ class ScheduledSessionSerializer(serializers.ModelSerializer):
         read_only_fields = ["created_at", "updated_at"]
 
     def get_conflicts(self, session):
+        if self.context.get("include_conflicts") is False:
+            return []
         return scheduling_conflicts(
             session.hall_id,
             session.starts_at,
