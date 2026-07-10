@@ -319,6 +319,7 @@ jobs:
                   CHANNEL_LAYER_REDIS_URL: redis://redis:6379/1
                   EXAM_AI_MODEL_DIR: /app/apps/api-django/sightline/exam_detection/models
                   EXAM_AI_MODEL_SIZE: ${EXAM_AI_MODEL_SIZE:-s}
+                  EXAM_AI_ANALYSIS_FPS: ${EXAM_AI_ANALYSIS_FPS:-5.0}
                 volumes:
                   - sightline-static:/app/apps/api-django/staticfiles
                   - sightline-media:/app/apps/api-django/media
@@ -354,7 +355,7 @@ jobs:
                   SIGHTLINE_COLLECTSTATIC: "0"
                   SIGHTLINE_SEED_IF_EMPTY: "0"
                   SIGHTLINE_ANALYSIS_THREAD_FALLBACK: "0"
-                  EXAM_AI_ANALYSIS_FPS: ${EXAM_AI_ANALYSIS_FPS:-2.0}
+                  EXAM_AI_ANALYSIS_FPS: ${EXAM_AI_ANALYSIS_FPS:-5.0}
                   EXAM_AI_MODEL_SIZE: ${EXAM_AI_MODEL_SIZE:-s}
                   EXAM_AI_MODEL_DIR: /app/apps/api-django/sightline/exam_detection/models
                 volumes:
@@ -443,7 +444,7 @@ jobs:
             SIGHTLINE_ANALYSIS_USE_CELERY=0
             SIGHTLINE_ANALYSIS_THREAD_FALLBACK=1
             CHANNEL_LAYER_REDIS_URL=redis://redis:6379/1
-            EXAM_AI_ANALYSIS_FPS=2.0
+            EXAM_AI_ANALYSIS_FPS=5.0
             EXAM_AI_MODEL_SIZE=s
             NEXT_PUBLIC_API_BASE_URL=${PUBLIC_URL}
             NEXT_PUBLIC_AUTH_BASE_URL=${PUBLIC_URL}
