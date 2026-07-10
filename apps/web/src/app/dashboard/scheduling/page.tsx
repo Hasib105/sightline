@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CalendarClock, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 
@@ -82,7 +82,7 @@ export default function SchedulingPage() {
   const [mode, setMode] = useState<"ai" | "manual">("ai");
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState<string | null>(null);
-  const [selectedCourseIds, setSelectedCourseIds] = useState<string[]>([]);
+  const [selectedCourseIds, setSelectedCourseIds] = useState<string[] | null>(null);
   const [termStart, setTermStart] = useState("2026-01-15");
   const [termEnd, setTermEnd] = useState("2026-04-30");
   const [teachingWeekdays, setTeachingWeekdays] = useState<number[]>([0, 1, 2, 3]);
@@ -104,7 +104,8 @@ export default function SchedulingPage() {
     ...(invigilatorsQuery.data ?? []).map((u) => ({ value: String(u.id), label: u.username })),
   ];
   const allCourseIds = courseOptions.map((option) => option.value);
-  const allSelected = allCourseIds.length > 0 && selectedCourseIds.length === allCourseIds.length;
+  const resolvedCourseIds = selectedCourseIds ?? allCourseIds;
+  const allSelected = allCourseIds.length > 0 && resolvedCourseIds.length === allCourseIds.length;
   const roomCount = hallsQuery.data?.length ?? scheduleRules?.room_count ?? 0;
 
   const toggleTeachingDay = (day: number) => {
@@ -125,12 +126,6 @@ export default function SchedulingPage() {
     });
   };
 
-  useEffect(() => {
-    if (courseOptions.length > 0 && selectedCourseIds.length === 0) {
-      setSelectedCourseIds(courseOptions.map((option) => option.value));
-    }
-  }, [courseOptions, selectedCourseIds.length]);
-
   const canCheck = Boolean(form.hall && form.starts_at && form.ends_at);
   const conflictQuery = useQuery({
     queryKey: ["schedule-conflicts", form.hall, form.starts_at, form.ends_at, form.course, form.invigilator],
@@ -148,11 +143,11 @@ export default function SchedulingPage() {
 
   const generateMutation = useMutation({
     mutationFn: () => {
-      if (selectedCourseIds.length === 0) {
+      if (resolvedCourseIds.length === 0) {
         throw new Error("Select at least one course.");
       }
       return generateSchedulePlan({
-        courses: selectedCourseIds.map(Number),
+        courses: resolvedCourseIds.map(Number),
         kind: aiKind,
         term_start: termStart,
         term_end: termEnd,
@@ -372,7 +367,7 @@ export default function SchedulingPage() {
                   </label>
                 </div>
                 <DashboardCheckboxGroup
-                  values={selectedCourseIds}
+                  values={resolvedCourseIds}
                   onValuesChange={setSelectedCourseIds}
                   options={courseOptions}
                 />

@@ -7,7 +7,6 @@ import {
   BookOpenCheck,
   Database,
   Loader2,
-  Settings2,
   ShieldCheck,
   UsersRound,
 } from "lucide-react";

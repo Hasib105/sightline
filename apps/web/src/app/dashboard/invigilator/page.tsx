@@ -89,12 +89,9 @@ function LiveAnalysisCanvas({
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [hasFrame, setHasFrame] = useState(false);
-  const [connectionLabel, setConnectionLabel] = useState(initialStatus || "Connecting to live analysis");
+  const [connectionLabel, setConnectionLabel] = useState("Connecting to live analysis");
   const socketUrl = useMemo(() => liveAnalysisWebSocketUrl(videoId), [videoId]);
-
-  useEffect(() => {
-    setConnectionLabel(initialStatus || "Connecting to live analysis");
-  }, [initialStatus]);
+  const statusLabel = hasFrame ? connectionLabel : initialStatus || connectionLabel;
 
   useEffect(() => {
     const socket = new WebSocket(socketUrl);
@@ -103,11 +100,6 @@ function LiveAnalysisCanvas({
 
     socket.binaryType = "blob";
 
-    socket.onopen = () => {
-      if (!initialStatus) {
-        setConnectionLabel("Waiting for analyzed frames");
-      }
-    };
     socket.onerror = () => setConnectionLabel("Live connection failed");
     socket.onclose = () => {
       if (!closed) {
@@ -159,7 +151,7 @@ function LiveAnalysisCanvas({
         URL.revokeObjectURL(activeObjectUrl);
       }
     };
-  }, [socketUrl, initialStatus]);
+  }, [socketUrl]);
 
   return (
     <div className="relative aspect-video w-full overflow-hidden rounded-md border border-[var(--dashboard-border)] bg-black">
@@ -172,7 +164,7 @@ function LiveAnalysisCanvas({
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-white/75">
           <span className="inline-flex items-center gap-2 rounded-md bg-black/45 px-3 py-2">
             <Loader2 className="size-4 animate-spin" />
-            {connectionLabel}
+            {statusLabel}
           </span>
         </div>
       ) : null}

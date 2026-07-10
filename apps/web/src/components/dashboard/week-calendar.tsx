@@ -36,14 +36,6 @@ export function formatScheduleDate(iso: string) {
   }).format(new Date(iso));
 }
 
-function formatScheduleTime(iso: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone: CAMPUS_TZ,
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(iso));
-}
-
 export function formatScheduleDateTime(iso: string) {
   return new Intl.DateTimeFormat(undefined, {
     timeZone: CAMPUS_TZ,
