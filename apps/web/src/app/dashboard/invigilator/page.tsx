@@ -57,9 +57,8 @@ function livePreviewUrl(video: ExamVideoSummary) {
   return `${absoluteMediaUrl(previewUrl)}${previewUrl.includes("?") ? "&" : "?"}t=${encodeURIComponent(cacheKey)}`;
 }
 
-function liveAnalysisWebSocketUrl(videoId: number, analysisStartedAt: string | null) {
-  const cacheKey = analysisStartedAt || String(videoId);
-  return `${apiWebSocketBaseUrl()}/ws/exam-videos/${videoId}/analysis/?t=${encodeURIComponent(cacheKey)}`;
+function liveAnalysisWebSocketUrl(videoId: number) {
+  return `${apiWebSocketBaseUrl()}/ws/exam-videos/${videoId}/analysis/`;
 }
 
 function absoluteMediaUrl(uri: string) {
@@ -81,20 +80,21 @@ function stringValue(value: JsonValue | undefined) {
 
 function LiveAnalysisCanvas({
   fallbackSrc,
-  video,
+  initialStatus,
+  videoId,
 }: {
   fallbackSrc: string;
-  video: ExamVideoSummary;
+  initialStatus: string;
+  videoId: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [hasFrame, setHasFrame] = useState(false);
-  const [connectionLabel, setConnectionLabel] = useState("Connecting to live analysis");
-  const videoId = video.id;
-  const analysisStartedAt = video.analysis_started_at;
-  const socketUrl = useMemo(
-    () => liveAnalysisWebSocketUrl(videoId, analysisStartedAt),
-    [videoId, analysisStartedAt]
-  );
+  const [connectionLabel, setConnectionLabel] = useState(initialStatus || "Connecting to live analysis");
+  const socketUrl = useMemo(() => liveAnalysisWebSocketUrl(videoId), [videoId]);
+
+  useEffect(() => {
+    setConnectionLabel(initialStatus || "Connecting to live analysis");
+  }, [initialStatus]);
 
   useEffect(() => {
     const socket = new WebSocket(socketUrl);
@@ -103,7 +103,11 @@ function LiveAnalysisCanvas({
 
     socket.binaryType = "blob";
 
-    socket.onopen = () => setConnectionLabel("Waiting for analyzed frames");
+    socket.onopen = () => {
+      if (!initialStatus) {
+        setConnectionLabel("Waiting for analyzed frames");
+      }
+    };
     socket.onerror = () => setConnectionLabel("Live connection failed");
     socket.onclose = () => {
       if (!closed) {
@@ -155,7 +159,7 @@ function LiveAnalysisCanvas({
         URL.revokeObjectURL(activeObjectUrl);
       }
     };
-  }, [socketUrl]);
+  }, [socketUrl, initialStatus]);
 
   return (
     <div className="relative aspect-video w-full overflow-hidden rounded-md border border-[var(--dashboard-border)] bg-black">
@@ -181,9 +185,10 @@ export default function InvigilatorDashboardPage() {
   const videosQuery = useQuery({
     queryKey: ["exam-videos"],
     queryFn: listExamVideos,
+    placeholderData: (previousData) => previousData,
     refetchInterval: (query) => {
       const videos = query.state.data ?? [];
-      return videos.some((video) => video.status === "analyzing") ? 1500 : false;
+      return videos.some((video) => video.status === "analyzing") ? 3000 : false;
     },
   });
   const videos = useMemo(() => videosQuery.data ?? [], [videosQuery.data]);
@@ -219,9 +224,36 @@ export default function InvigilatorDashboardPage() {
 
   const startMutation = useMutation({
     mutationFn: startExamVideoAnalysis,
-    onSuccess: async (video) => {
-      setSelectedVideoId(video.id);
-      await queryClient.invalidateQueries({ queryKey: ["exam-videos"] });
+    onMutate: async (videoId) => {
+      await queryClient.cancelQueries({ queryKey: ["exam-videos"] });
+      const previous = queryClient.getQueryData<ExamVideoSummary[]>(["exam-videos"]);
+      const startedAt = new Date().toISOString();
+      queryClient.setQueryData<ExamVideoSummary[]>(["exam-videos"], (current) =>
+        current?.map((video) =>
+          video.id === videoId
+            ? {
+                ...video,
+                status: "analyzing",
+                analysis_started_at: startedAt,
+                analysis_completed_at: null,
+                error_message: "",
+                frames_analyzed: 0,
+                analysis_report: {},
+                result: null,
+              }
+            : video
+        ) ?? current
+      );
+      setSelectedVideoId(videoId);
+      return { previous };
+    },
+    onError: (_error, _videoId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["exam-videos"], context.previous);
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["exam-videos"] });
     },
   });
 
@@ -242,6 +274,7 @@ export default function InvigilatorDashboardPage() {
   const latestCompletedVideo = videos.find((video) => video.status === "completed");
   const selectedVideo = videos.find((video) => video.id === selectedVideoId) ?? videos[0] ?? null;
   const selectedLivePreview = selectedVideo ? livePreviewUrl(selectedVideo) : "";
+  const startingVideoId = startMutation.isPending ? startMutation.variables : null;
 
   const deleteVideo = (video: ExamVideoSummary) => {
     if (window.confirm(`Delete ${video.original_filename}?`)) {
@@ -312,9 +345,13 @@ export default function InvigilatorDashboardPage() {
                 <Button
                   size="sm"
                   onClick={() => startMutation.mutate(selectedVideo.id)}
-                  disabled={startMutation.isPending}
+                  disabled={startMutation.isPending && startingVideoId === selectedVideo.id}
                 >
-                  {startMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <PlayCircle className="size-4" />}
+                  {startMutation.isPending && startingVideoId === selectedVideo.id ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <PlayCircle className="size-4" />
+                  )}
                   Start analysis
                 </Button>
               ) : null}
@@ -343,9 +380,10 @@ export default function InvigilatorDashboardPage() {
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
             {selectedVideo.status === "analyzing" ? (
               <LiveAnalysisCanvas
-                key={`${selectedVideo.id}-${selectedVideo.analysis_started_at ?? "pending"}`}
+                key={selectedVideo.id}
                 fallbackSrc={selectedLivePreview}
-                video={selectedVideo}
+                initialStatus={selectedVideo.result?.latest_status || "Loading YOLO models..."}
+                videoId={selectedVideo.id}
               />
             ) : (
               <video
@@ -477,9 +515,13 @@ export default function InvigilatorDashboardPage() {
                         <Button
                           size="sm"
                           onClick={() => startMutation.mutate(video.id)}
-                          disabled={startMutation.isPending}
+                          disabled={startMutation.isPending && startingVideoId === video.id}
                         >
-                          {startMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <PlayCircle className="size-4" />}
+                          {startMutation.isPending && startingVideoId === video.id ? (
+                            <Loader2 className="size-4 animate-spin" />
+                          ) : (
+                            <PlayCircle className="size-4" />
+                          )}
                           Start
                         </Button>
                       ) : null}

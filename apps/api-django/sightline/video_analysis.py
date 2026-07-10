@@ -25,7 +25,10 @@ def analyze_exam_video(video_id: int) -> dict[str, Any]:
 
     try:
         from .exam_detection.config import CFG
-        from .exam_detection.processor import process_video
+        from .exam_detection.processor import process_video, warmup_detector
+
+        _publish_analysis_status(video, "Loading YOLO models...")
+        warmup_detector()
 
         video_path = _video_path(video)
         output_dir = Path(settings.MEDIA_ROOT) / "evidence" / f"exam_video_{video.id}"
@@ -34,9 +37,10 @@ def analyze_exam_video(video_id: int) -> dict[str, Any]:
             defaults={
                 "model_name": CFG.detector_label(),
                 "session_uri": _media_uri(output_dir),
-                "latest_status": "Starting analysis",
+                "latest_status": "Opening video...",
             },
         )
+        _publish_analysis_status(video, "Opening video...")
         result = process_video(
             video_path,
             video.original_filename,
@@ -92,6 +96,20 @@ def analyze_exam_video(video_id: int) -> dict[str, Any]:
         )
         close_live_stream(video.id)
         raise
+
+
+def _publish_analysis_status(video: ExamVideo, status_text: str) -> None:
+    payload = {
+        "type": "status",
+        "video_id": video.id,
+        "status": ExamVideo.STATUS_ANALYZING,
+        "latest_status": status_text,
+    }
+    publish_live_status(video.id, payload)
+    ExamVideoAnalysisResult.objects.update_or_create(
+        exam_video=video,
+        defaults={"latest_status": status_text},
+    )
 
 
 def _report_payload(result: Any, created_alert_ids: list[int]) -> dict[str, Any]:

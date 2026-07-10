@@ -161,3 +161,7 @@ SIGHTLINE_ANALYSIS_THREAD_FALLBACK = os.environ.get("SIGHTLINE_ANALYSIS_THREAD_F
     "true",
     "yes",
 }
+_use_celery_env = os.environ.get("SIGHTLINE_ANALYSIS_USE_CELERY", "").strip().lower()
+SIGHTLINE_ANALYSIS_USE_CELERY = (
+    None if not _use_celery_env else _use_celery_env in {"1", "true", "yes"}
+)

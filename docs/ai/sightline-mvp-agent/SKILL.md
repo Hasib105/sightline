@@ -95,7 +95,7 @@ The seed command should create:
 - 1 admin
 - 3 invigilators
 - 5 teachers
-- 20 students
+- 35 students
 
 Default demo password: `sightline`.
 

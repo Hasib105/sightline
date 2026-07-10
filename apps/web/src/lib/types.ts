@@ -894,12 +894,79 @@ export interface AtRiskInputRow {
 export interface AtRiskRunPayload {
   course: number;
   source_name?: string;
-  rows: AtRiskInputRow[];
+  rows?: AtRiskInputRow[];
+  import_id?: number;
 }
 
 export interface AtRiskRunResponse {
   run_id: number;
+  course?: number;
+  course_code?: string;
   scores: StudentRiskScore[];
+}
+
+export interface AcademicRecordImport {
+  id: number;
+  source_name: string;
+  status: string;
+  issue_summary: string;
+  imported_rows: number;
+  uploaded_by_username: string | null;
+  created_at: string;
+}
+
+export interface AcademicImportPreview {
+  import: AcademicRecordImport;
+  rows: Array<{
+    student_number: string;
+    student_name: string;
+    attended: number;
+    total: number;
+    course_code: string;
+  }>;
+}
+
+export interface ScheduleSuggestion {
+  kind: "class" | "exam";
+  course: number;
+  course_code: string;
+  course_title: string;
+  hall: number;
+  hall_name: string;
+  invigilator: number | null;
+  title: string;
+  starts_at: string;
+  ends_at: string;
+  conflicts: ScheduleConflict[];
+}
+
+export interface ScheduleGenerateResponse {
+  suggestions: ScheduleSuggestion[];
+  count: number;
+  rules?: {
+    hours: string;
+    class_duration_minutes?: number;
+    classes_per_week?: number;
+    teaching_weekdays?: number[];
+    weekend_days?: number[];
+    room_count?: number;
+    weeks_planned?: number;
+    schedule_mode?: "week" | "semester";
+    kind?: "class" | "exam";
+    term_start?: string | null;
+    term_end?: string | null;
+    holidays: string[];
+    optimization?: {
+      enabled?: boolean;
+      max_conflict_ratio?: number;
+      total?: number;
+      conflict_free?: number;
+      with_conflicts?: number;
+      skipped?: number;
+      clean_ratio?: number;
+      conflict_budget?: number;
+    };
+  };
 }
 
 export interface AdminAnalyticsCard {

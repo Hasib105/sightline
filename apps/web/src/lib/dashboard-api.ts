@@ -22,6 +22,10 @@ import type {
   ContentPostPayload,
   AtRiskRunPayload,
   AtRiskRunResponse,
+  AcademicRecordImport,
+  AcademicImportPreview,
+  ScheduleGenerateResponse,
+  ScheduleSuggestion,
   CourseCreatePayload,
   CourseEnrollment,
   CourseChatThread,
@@ -81,14 +85,22 @@ export class ApiError extends Error {
 async function parseResponse<T>(response: Response): Promise<T> {
   const payload = (await response.json().catch(() => null)) as
     | T
-    | { detail?: string; message?: string }
+    | { detail?: string | string[] | Record<string, unknown>; message?: string }
     | null;
   if (!response.ok) {
-    const errorMessage =
-      (payload as { detail?: string; message?: string } | null)?.detail ??
-      (payload as { detail?: string; message?: string } | null)?.message ??
-      `Request failed with status ${response.status}`;
-    throw new ApiError(errorMessage, response.status);
+    const rawDetail = (payload as { detail?: string | string[] | Record<string, unknown>; message?: string } | null)?.detail;
+    const messageField = (payload as { message?: string } | null)?.message;
+    let errorMessage = messageField;
+    if (!errorMessage && typeof rawDetail === "string") {
+      errorMessage = rawDetail;
+    } else if (!errorMessage && Array.isArray(rawDetail)) {
+      errorMessage = rawDetail.join(", ");
+    } else if (!errorMessage && rawDetail && typeof rawDetail === "object") {
+      errorMessage = Object.entries(rawDetail)
+        .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(", ") : String(value)}`)
+        .join(" · ");
+    }
+    throw new ApiError(errorMessage ?? `Request failed with status ${response.status}`, response.status);
   }
   return payload as T;
 }
@@ -924,8 +936,9 @@ export async function deleteExamVideo(videoId: number): Promise<{ deleted: boole
   return parseResponse<{ deleted: boolean; record_id: number }>(response);
 }
 
-export async function listAtRiskScores(): Promise<StudentRiskScore[]> {
-  const response = await apiFetchClient("/api/v1/at-risk");
+export async function listAtRiskScores(course?: number): Promise<StudentRiskScore[]> {
+  const suffix = course ? `?course=${course}` : "";
+  const response = await apiFetchClient(`/api/v1/at-risk${suffix}`);
   return parseResponse<StudentRiskScore[]>(response);
 }
 
@@ -938,6 +951,37 @@ export async function runAtRiskAnalysis(
     body: JSON.stringify(payload),
   });
   return parseResponse<AtRiskRunResponse>(response);
+}
+
+export async function resetRiskAnalysis(course: number): Promise<{
+  course: number;
+  course_code: string;
+  deleted_scores: number;
+  message: string;
+}> {
+  const response = await apiFetchClient("/api/v1/at-risk/reset", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ course }),
+  });
+  return parseResponse<{
+    course: number;
+    course_code: string;
+    deleted_scores: number;
+    message: string;
+  }>(response);
+}
+
+export async function listAcademicImports(course?: number): Promise<AcademicRecordImport[]> {
+  const suffix = course ? `?course=${course}` : "";
+  const response = await apiFetchClient(`/api/v1/academic-imports${suffix}`);
+  return parseResponse<AcademicRecordImport[]>(response);
+}
+
+export async function getAcademicImportPreview(importId: number, course?: number): Promise<AcademicImportPreview> {
+  const suffix = course ? `?course=${course}` : "";
+  const response = await apiFetchClient(`/api/v1/academic-imports/${importId}${suffix}`);
+  return parseResponse<AcademicImportPreview>(response);
 }
 
 // --- Student analytics (ML failure prediction) ---
@@ -1035,6 +1079,15 @@ export async function deleteSchedule(id: number): Promise<{ deleted: boolean; re
   return parseResponse<{ deleted: boolean; record_id: number }>(response);
 }
 
+export async function clearAllSchedules(courseIds?: number[]): Promise<{ deleted: number; message: string }> {
+  const response = await apiFetchClient("/api/v1/schedules/clear", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(courseIds?.length ? { courses: courseIds } : {}),
+  });
+  return parseResponse<{ deleted: number; message: string }>(response);
+}
+
 export async function checkScheduleConflicts(payload: {
   hall: number;
   starts_at: string;
@@ -1054,6 +1107,48 @@ export async function checkScheduleConflicts(payload: {
 export async function getMySchedule(): Promise<StudentScheduleResponse> {
   const response = await apiFetchClient("/api/v1/schedules/my");
   return parseResponse<StudentScheduleResponse>(response);
+}
+
+export async function generateSchedulePlan(payload: {
+  courses: number[];
+  week_start?: string;
+  kind: "class" | "exam";
+  term_start?: string;
+  term_end?: string;
+  teaching_weekdays?: number[];
+  weekend_days?: number[];
+  day_start_hour?: number;
+  day_end_hour?: number;
+  class_duration_minutes?: number;
+  classes_per_week?: number;
+  optimize_conflicts?: boolean;
+  max_conflict_ratio?: number;
+  shuffle_seed?: number;
+}): Promise<ScheduleGenerateResponse> {
+  const response = await apiFetchClient("/api/v1/schedules/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<ScheduleGenerateResponse>(response);
+}
+
+export async function bulkCreateSchedules(sessions: ScheduleSuggestion[]): Promise<ScheduledSession[]> {
+  const payload = sessions.map((session) => ({
+    kind: session.kind,
+    course: session.course,
+    hall: session.hall,
+    invigilator: session.invigilator ?? null,
+    title: session.title,
+    starts_at: session.starts_at,
+    ends_at: session.ends_at,
+  }));
+  const response = await apiFetchClient("/api/v1/schedules/bulk", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessions: payload }),
+  });
+  return parseResponse<ScheduledSession[]>(response);
 }
 
 export async function listHalls(): Promise<HallOption[]> {

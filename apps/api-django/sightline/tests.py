@@ -14,6 +14,7 @@ from langchain_core.messages import AIMessageChunk
 from .exam_detection.config import CFG
 from .course_rag import retrieve_course_context
 from .models import (
+    AcademicRecordImport,
     Course,
     CourseEnrollment,
     CourseChatMessage,
@@ -24,7 +25,9 @@ from .models import (
     ExamSession,
     ExamVideo,
     ExamVideoAnalysisResult,
+    Hall,
     NotificationEvent,
+    ScheduledSession,
     StudentRiskScore,
 )
 from .tasks import index_course_material_task
@@ -641,9 +644,10 @@ class SightlineApiSmokeTests(TestCase):
     def test_exam_video_analysis_queue_uses_celery(self):
         from . import tasks
 
-        with patch.object(tasks.analyze_exam_video_task, "delay") as delay:
-            delay.return_value.id = "task-123"
-            queue_info = tasks.queue_exam_video_analysis(123)
+        with patch.object(tasks, "_celery_broker_reachable", return_value=True):
+            with patch.object(tasks.analyze_exam_video_task, "delay") as delay:
+                delay.return_value.id = "task-123"
+                queue_info = tasks.queue_exam_video_analysis(123)
 
         self.assertEqual(queue_info["mode"], "celery")
         self.assertEqual(queue_info["task_id"], "task-123")
@@ -652,13 +656,27 @@ class SightlineApiSmokeTests(TestCase):
     def test_exam_video_analysis_queue_falls_back_to_realtime_thread(self):
         from . import tasks
 
-        with patch.object(tasks.analyze_exam_video_task, "delay", side_effect=RuntimeError("broker down")):
-            with patch.object(tasks._analysis_executor, "submit") as submit:
-                submit.return_value = object()
-                queue_info = tasks.queue_exam_video_analysis(123)
+        with patch.object(tasks, "_celery_broker_reachable", return_value=True):
+            with patch.object(tasks.analyze_exam_video_task, "delay", side_effect=RuntimeError("broker down")):
+                with patch.object(tasks._analysis_executor, "submit") as submit:
+                    submit.return_value = object()
+                    queue_info = tasks.queue_exam_video_analysis(123)
 
         self.assertEqual(queue_info["mode"], "realtime-thread")
         self.assertIsNone(queue_info["task_id"])
+        submit.assert_called_once_with(tasks._run_threaded_analysis, 123)
+
+    def test_exam_video_analysis_queue_skips_celery_when_broker_unreachable(self):
+        from . import tasks
+
+        with patch.object(tasks, "_celery_broker_reachable", return_value=False):
+            with patch.object(tasks.analyze_exam_video_task, "delay") as delay:
+                with patch.object(tasks._analysis_executor, "submit") as submit:
+                    submit.return_value = object()
+                    queue_info = tasks.queue_exam_video_analysis(123)
+
+        self.assertEqual(queue_info["mode"], "realtime-thread")
+        delay.assert_not_called()
         submit.assert_called_once_with(tasks._run_threaded_analysis, 123)
 
     def test_teacher_can_run_at_risk_analysis_for_own_course(self):
@@ -705,3 +723,103 @@ class SightlineApiSmokeTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+    def test_teacher_can_list_academic_imports_for_course(self):
+        self.assertTrue(self.client.login(username="teacher", password="sightline"))
+        course = Course.objects.get(code="CSE-321")
+        record_import = AcademicRecordImport.objects.filter(attendancerecord__course=course).first()
+        self.assertIsNotNone(record_import)
+
+        response = self.client.get(f"/api/v1/academic-imports?course={course.id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(any(item["id"] == record_import.id for item in response.json()))
+
+    def test_teacher_can_rerun_at_risk_from_existing_import(self):
+        self.assertTrue(self.client.login(username="teacher", password="sightline"))
+        course = Course.objects.get(code="CSE-321")
+        record_import = AcademicRecordImport.objects.filter(attendancerecord__course=course).first()
+        self.assertIsNotNone(record_import)
+        before = StudentRiskScore.objects.filter(course=course).count()
+
+        response = self.client.post(
+            "/api/v1/at-risk",
+            data={"course": course.id, "import_id": record_import.id},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertGreaterEqual(StudentRiskScore.objects.filter(course=course).count(), before)
+
+    def test_teacher_can_run_at_risk_with_explicit_course(self):
+        self.assertTrue(self.client.login(username="teacher", password="sightline"))
+        course = Course.objects.get(code="CSE-321")
+
+        response = self.client.post(
+            "/api/v1/at-risk",
+            data={
+                "course": course.id,
+                "source_name": "explicit-course-risk.csv",
+                "rows": [{"student_number": "S-1001", "attended": 12, "total": 24, "score": 55, "max_score": 100}],
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["course_code"], "CSE-321")
+
+    def test_teacher_can_generate_and_bulk_create_schedules(self):
+        self.assertTrue(self.client.login(username="teacher", password="sightline"))
+        course = Course.objects.get(code="CSE-321")
+        week_start = timezone.localdate() + timezone.timedelta(days=7)
+
+        generate_response = self.client.post(
+            "/api/v1/schedules/generate",
+            data={
+                "courses": [course.id],
+                "week_start": week_start.isoformat(),
+                "term_start": "2026-01-15",
+                "term_end": "2026-04-30",
+                "kind": "class",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(generate_response.status_code, 200)
+        suggestions = generate_response.json()["suggestions"]
+        self.assertGreaterEqual(len(suggestions), 1)
+        rules = generate_response.json()["rules"]
+        self.assertEqual(rules["class_duration_minutes"], 90)
+        self.assertEqual(rules["classes_per_week"], 3)
+
+        bulk_response = self.client.post(
+            "/api/v1/schedules/bulk",
+            data={"sessions": suggestions},
+            content_type="application/json",
+        )
+        self.assertEqual(bulk_response.status_code, 201)
+        self.assertEqual(len(bulk_response.json()), 1)
+        self.assertTrue(ScheduledSession.objects.filter(course=course, hall_id=suggestions[0]["hall"]).exists())
+
+    def test_teacher_can_reset_risk_data_and_reupload(self):
+        self.assertTrue(self.client.login(username="teacher", password="sightline"))
+        course = Course.objects.get(code="CSE-321")
+        self.assertTrue(StudentRiskScore.objects.filter(course=course).exists())
+
+        reset_response = self.client.post(
+            "/api/v1/at-risk/reset",
+            data={"course": course.id},
+            content_type="application/json",
+        )
+        self.assertEqual(reset_response.status_code, 200)
+        self.assertEqual(StudentRiskScore.objects.filter(course=course).count(), 0)
+
+        upload_response = self.client.post(
+            "/api/v1/at-risk",
+            data={
+                "course": course.id,
+                "source_name": "reupload.csv",
+                "rows": [{"student_number": "S-1001", "attended": 20, "total": 24, "score": 80, "max_score": 100}],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(upload_response.status_code, 201)
+        self.assertTrue(StudentRiskScore.objects.filter(course=course, student__student_number="S-1001").exists())

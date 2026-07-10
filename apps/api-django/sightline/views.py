@@ -10,7 +10,7 @@ from django.contrib.auth import authenticate, get_user, login as django_login, l
 from django.contrib.auth.models import User
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import Avg, Count, Max
+from django.db.models import Avg, Count, Max, Q
 from django.http import JsonResponse, StreamingHttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -52,11 +52,20 @@ from .models import (
 from . import predict
 from .course_rag import answer_course_question, index_course, remove_material_index, stream_course_question_events
 from .services import (
+    ACADEMIC_HOLIDAYS,
+    DEFAULT_TEACHING_WEEKDAYS,
+    DEFAULT_WEEKEND_DAYS,
     agenda_for_student,
+    bulk_create_scheduled_sessions,
     calculate_risk_run,
+    clear_scheduled_sessions,
+    default_course_for_risk,
     generate_due_notifications,
+    generate_schedule_plan,
+    reset_course_risk_data,
     scheduling_conflicts,
     sessions_for_student,
+    _semester_week_starts,
 )
 from .tasks import queue_course_material_index
 
@@ -228,6 +237,180 @@ class CurrentUserView(SessionlessAPIView):
         if not is_authenticated_request(request):
             return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
         return Response(serializers.CurrentUserSerializer(django_user(request)).data)
+
+
+class AtRiskResetView(SessionlessAPIView):
+    def post(self, request):
+        payload, error = _at_risk_reset_payload(request)
+        if error:
+            return error
+        return Response(payload)
+
+
+def _at_risk_reset_payload(request):
+    if not is_authenticated_request(request):
+        return None, Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+    if not has_role(request, UserProfile.ROLE_TEACHER):
+        return None, Response({"detail": "Only teachers or admins can reset risk analysis."}, status=status.HTTP_403_FORBIDDEN)
+
+    serializer = serializers.RiskResetSerializer(data=request.data)
+    if not serializer.is_valid():
+        detail = serializer.errors.get("course", serializer.errors)
+        if isinstance(detail, list):
+            detail = detail[0]
+        return None, Response({"detail": str(detail)}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = django_user(request)
+    admin = is_admin_request(request)
+    course = serializer.validated_data["course"]
+    if not admin and course.teacher_id and course.teacher_id != user.id:
+        return None, Response({"detail": "Teachers can reset only their own courses."}, status=status.HTTP_403_FORBIDDEN)
+
+    deleted_scores = reset_course_risk_data(course)
+    return {
+        "course": course.id,
+        "course_code": course.code,
+        "deleted_scores": deleted_scores,
+        "message": f"Cleared {deleted_scores} risk score(s) for {course.code}. Upload a new CSV to run again.",
+    }, None
+
+
+def _schedule_generate_payload(request, validated_data):
+    course_ids = validated_data["courses"]
+    if user_role(request) == UserProfile.ROLE_TEACHER and not is_admin_request(request):
+        allowed = set(
+            Course.objects.filter(teacher=django_user(request), id__in=course_ids).values_list("id", flat=True)
+        )
+        if len(allowed) != len(set(course_ids)):
+            return None, Response({"detail": "Teachers can only schedule their own courses."}, status=status.HTTP_403_FORBIDDEN)
+
+    teaching_weekdays = validated_data.get("teaching_weekdays") or list(DEFAULT_TEACHING_WEEKDAYS)
+    weekend_days = validated_data.get("weekend_days") or list(DEFAULT_WEEKEND_DAYS)
+    term_start = validated_data.get("term_start")
+    term_end = validated_data.get("term_end")
+    plan_result = generate_schedule_plan(
+        course_ids,
+        week_start=validated_data.get("week_start"),
+        kind=validated_data["kind"],
+        teaching_weekdays=teaching_weekdays,
+        weekend_days=weekend_days,
+        holidays=ACADEMIC_HOLIDAYS,
+        day_start_hour=validated_data.get("day_start_hour", 8),
+        day_end_hour=validated_data.get("day_end_hour", 16),
+        class_duration_minutes=validated_data.get("class_duration_minutes", 90),
+        classes_per_week=validated_data.get("classes_per_week", 3),
+        term_start=term_start,
+        term_end=term_end,
+        optimize_conflicts=validated_data.get("optimize_conflicts", True),
+        max_conflict_ratio=validated_data.get("max_conflict_ratio", 0.05),
+        shuffle_seed=validated_data.get("shuffle_seed"),
+    )
+    suggestions = plan_result["suggestions"]
+    plan_stats = plan_result.get("stats", {})
+    payload = [
+        {**item, "starts_at": item["starts_at"].isoformat(), "ends_at": item["ends_at"].isoformat()}
+        for item in suggestions
+    ]
+    hall_count = Hall.objects.count()
+    weeks_planned = 1
+    if validated_data.get("week_start"):
+        weeks_planned = 1
+    elif term_start and term_end:
+        weeks_planned = len(_semester_week_starts(term_start, term_end))
+    schedule_kind = validated_data["kind"]
+    return {
+        "suggestions": payload,
+        "count": len(payload),
+        "rules": {
+            "hours": f"{validated_data.get('day_start_hour', 8):02d}:00–{validated_data.get('day_end_hour', 16):02d}:00",
+            "class_duration_minutes": validated_data.get("class_duration_minutes", 90),
+            "classes_per_week": validated_data.get("classes_per_week", 3),
+            "teaching_weekdays": teaching_weekdays,
+            "weekend_days": weekend_days,
+            "room_count": hall_count,
+            "weeks_planned": weeks_planned,
+            "schedule_mode": "week" if validated_data.get("week_start") else "semester",
+            "kind": schedule_kind,
+            "term_start": term_start.isoformat() if term_start else None,
+            "term_end": term_end.isoformat() if term_end else None,
+            "holidays": [item.isoformat() for item in ACADEMIC_HOLIDAYS],
+            "optimization": {
+                "enabled": validated_data.get("optimize_conflicts", True),
+                "max_conflict_ratio": validated_data.get("max_conflict_ratio", 0.05),
+                **plan_stats,
+            },
+        },
+    }, None
+
+
+class ScheduleGenerateView(SessionlessAPIView):
+    def post(self, request):
+        if not is_authenticated_request(request):
+            return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not has_role(request, UserProfile.ROLE_TEACHER):
+            return Response({"detail": "Only teachers or admins can generate schedules."}, status=status.HTTP_403_FORBIDDEN)
+        serializer = serializers.ScheduleGenerateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload, error = _schedule_generate_payload(request, serializer.validated_data)
+        if error:
+            return error
+        return Response(payload)
+
+
+class ScheduleBulkView(SessionlessAPIView):
+    def post(self, request):
+        if not is_authenticated_request(request):
+            return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not has_role(request, UserProfile.ROLE_TEACHER):
+            return Response({"detail": "Only teachers or admins can create schedules."}, status=status.HTTP_403_FORBIDDEN)
+        serializer = serializers.ScheduleBulkCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        sessions = serializer.validated_data["sessions"]
+        if user_role(request) == UserProfile.ROLE_TEACHER and not is_admin_request(request):
+            course_ids = {item.get("course") for item in sessions if item.get("course")}
+            allowed = set(
+                Course.objects.filter(teacher=django_user(request), id__in=course_ids).values_list("id", flat=True)
+            )
+            if allowed != course_ids:
+                return Response({"detail": "Teachers can only schedule their own courses."}, status=status.HTTP_403_FORBIDDEN)
+        created = bulk_create_scheduled_sessions(request, sessions)
+        return Response(
+            serializers.ScheduledSessionSerializer(created, many=True).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ScheduleClearView(SessionlessAPIView):
+    def post(self, request):
+        if not is_authenticated_request(request):
+            return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not has_role(request, UserProfile.ROLE_TEACHER):
+            return Response({"detail": "Only teachers or admins can clear schedules."}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = serializers.ScheduleClearSerializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        course_ids = serializer.validated_data.get("courses") or None
+        user = django_user(request)
+        admin = is_admin_request(request)
+
+        if course_ids and user_role(request) == UserProfile.ROLE_TEACHER and not admin:
+            allowed = set(
+                Course.objects.filter(teacher=user, id__in=course_ids).values_list("id", flat=True)
+            )
+            if allowed != set(course_ids):
+                return Response({"detail": "Teachers can only clear schedules for their own courses."}, status=status.HTTP_403_FORBIDDEN)
+
+        deleted_count = clear_scheduled_sessions(
+            course_ids=course_ids,
+            teacher_user=user if user_role(request) == UserProfile.ROLE_TEACHER and not admin else None,
+            admin=admin,
+        )
+        return Response(
+            {
+                "deleted": deleted_count,
+                "message": f"Deleted {deleted_count} scheduled session(s). Generate a new plan when ready.",
+            }
+        )
 
 
 class ApiV1DispatchView(SessionlessAPIView):
@@ -761,6 +944,12 @@ class ApiV1DispatchView(SessionlessAPIView):
                     default_storage.delete(file_uri)
                 return Response({"deleted": True, "record_id": record_id})
 
+        if clean_path == "at-risk/reset" and request.method == "POST":
+            payload, error = _at_risk_reset_payload(request)
+            if error:
+                return error
+            return Response(payload)
+
         if clean_path == "at-risk":
             auth_error = self.auth_required(request)
             if auth_error:
@@ -771,23 +960,77 @@ class ApiV1DispatchView(SessionlessAPIView):
                 queryset = StudentRiskScore.objects.select_related("student", "course", "run").order_by("-risk_score")
                 if user_role(request) == UserProfile.ROLE_TEACHER and not is_admin_request(request):
                     queryset = queryset.filter(course__teacher=django_user(request))
+                course_id = request.GET.get("course")
+                if course_id and course_id.isdigit():
+                    queryset = queryset.filter(course_id=int(course_id))
                 return Response(serializers.StudentRiskScoreSerializer(queryset, many=True).data)
             if request.method == "POST":
-                course = Course.objects.filter(id=request.data.get("course")).first()
-                if not course:
-                    return Response({"detail": "Course not found."}, status=status.HTTP_400_BAD_REQUEST)
-                if not is_admin_request(request) and course.teacher_id != django_user(request).id:
-                    return Response({"detail": "Teachers can run risk checks only for their own courses."}, status=status.HTTP_403_FORBIDDEN)
                 serializer = serializers.AtRiskRunSerializer(data=request.data, context={"request": request})
-                serializer.is_valid(raise_exception=True)
+                if not serializer.is_valid():
+                    detail = serializer.errors.get("detail")
+                    if not detail:
+                        detail = serializer.errors
+                    if isinstance(detail, list):
+                        detail = detail[0]
+                    return Response({"detail": str(detail)}, status=status.HTTP_400_BAD_REQUEST)
                 run = serializer.save()
                 return Response(
                     {
                         "run_id": run.id,
+                        "course": run.course_id,
+                        "course_code": run.course.code,
                         "scores": serializers.StudentRiskScoreSerializer(run.scores.select_related("student", "course"), many=True).data,
                     },
                     status=status.HTTP_201_CREATED,
                 )
+
+        if clean_path == "academic-imports" and request.method == "GET":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if not has_role(request, UserProfile.ROLE_TEACHER):
+                return Response({"detail": "Only teachers or admins can view academic imports."}, status=status.HTTP_403_FORBIDDEN)
+            queryset = AcademicRecordImport.objects.filter(status=AcademicRecordImport.STATUS_VALIDATED).order_by("-created_at")
+            course_id = request.GET.get("course")
+            if course_id and course_id.isdigit():
+                queryset = queryset.filter(
+                    Q(attendancerecord__course_id=int(course_id)) | Q(assessmentrecord__course_id=int(course_id))
+                ).distinct()
+            if user_role(request) == UserProfile.ROLE_TEACHER and not is_admin_request(request):
+                teacher = django_user(request)
+                queryset = queryset.filter(
+                    Q(attendancerecord__course__teacher=teacher) | Q(assessmentrecord__course__teacher=teacher)
+                ).distinct()
+            return Response(serializers.AcademicRecordImportSerializer(queryset, many=True).data)
+
+        if clean_path.startswith("academic-imports/"):
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if not has_role(request, UserProfile.ROLE_TEACHER):
+                return Response({"detail": "Only teachers or admins can view academic imports."}, status=status.HTTP_403_FORBIDDEN)
+            parts = clean_path.split("/")
+            if len(parts) != 2 or not parts[1].isdigit():
+                return Response({"detail": "Invalid import route."}, status=status.HTTP_404_NOT_FOUND)
+            record_import = AcademicRecordImport.objects.filter(id=int(parts[1])).first()
+            if not record_import:
+                return Response({"detail": "Import not found."}, status=status.HTTP_404_NOT_FOUND)
+            if request.method == "GET":
+                course_id = request.GET.get("course")
+                attendance = AttendanceRecord.objects.filter(source_import=record_import).select_related("student", "course")
+                if course_id and course_id.isdigit():
+                    attendance = attendance.filter(course_id=int(course_id))
+                rows = [
+                    {
+                        "student_number": item.student.student_number,
+                        "student_name": item.student.full_name,
+                        "attended": item.attended,
+                        "total": item.total,
+                        "course_code": item.course.code,
+                    }
+                    for item in attendance
+                ]
+                return Response({"import": serializers.AcademicRecordImportSerializer(record_import).data, "rows": rows})
 
         if clean_path == "analytics/risk/heatmap" and request.method == "GET":
             auth_error = self.auth_required(request)
@@ -920,6 +1163,36 @@ class ApiV1DispatchView(SessionlessAPIView):
             )
             return Response({"conflicts": conflicts})
 
+        if clean_path == "schedules/generate" and request.method == "POST":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if not has_role(request, UserProfile.ROLE_TEACHER):
+                return Response({"detail": "Only teachers or admins can generate schedules."}, status=status.HTTP_403_FORBIDDEN)
+            serializer = serializers.ScheduleGenerateSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            payload, error = _schedule_generate_payload(request, serializer.validated_data)
+            if error:
+                return error
+            return Response(payload)
+
+        if clean_path == "schedules/bulk" and request.method == "POST":
+            auth_error = self.auth_required(request)
+            if auth_error:
+                return auth_error
+            if not has_role(request, UserProfile.ROLE_TEACHER):
+                return Response({"detail": "Only teachers or admins can create schedules."}, status=status.HTTP_403_FORBIDDEN)
+            serializer = serializers.ScheduleBulkCreateSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            created = bulk_create_scheduled_sessions(request, serializer.validated_data["sessions"])
+            return Response(
+                serializers.ScheduledSessionSerializer(created, many=True).data,
+                status=status.HTTP_201_CREATED,
+            )
+
+        if clean_path == "schedules/clear" and request.method == "POST":
+            return ScheduleClearView().post(request)
+
         if clean_path == "schedules":
             auth_error = self.auth_required(request)
             if auth_error:
@@ -947,6 +1220,8 @@ class ApiV1DispatchView(SessionlessAPIView):
                 return auth_error
             parts = clean_path.split("/")
             if len(parts) != 2 or not parts[1].isdigit():
+                if parts[1] in {"generate", "bulk", "clear", "conflicts", "my"}:
+                    return Response({"detail": f"Schedule endpoint /{parts[1]} is registered separately."}, status=status.HTTP_404_NOT_FOUND)
                 return Response({"detail": "Invalid schedule route."}, status=status.HTTP_404_NOT_FOUND)
             session = ScheduledSession.objects.filter(id=int(parts[1])).first()
             if not session:

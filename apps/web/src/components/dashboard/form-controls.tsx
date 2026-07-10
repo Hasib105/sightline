@@ -129,6 +129,51 @@ export function DashboardCheckbox({
   );
 }
 
+export function DashboardCheckboxGroup({
+  values,
+  onValuesChange,
+  options,
+  disabled,
+}: {
+  values: string[];
+  onValuesChange: (values: string[]) => void;
+  options: DashboardSelectOption[];
+  disabled?: boolean;
+}) {
+  const toggle = (value: string, checked: boolean) => {
+    if (checked) {
+      onValuesChange([...values, value]);
+      return;
+    }
+    onValuesChange(values.filter((item) => item !== value));
+  };
+
+  return (
+    <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-[var(--dashboard-border)] bg-[var(--dashboard-panel-muted)] p-2">
+      {options.map((option) => {
+        const checked = values.includes(option.value);
+        return (
+          <label
+            key={option.value}
+            className={cn(
+              "flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm text-foreground hover:bg-[var(--dashboard-accent-soft)]",
+              (disabled || option.disabled) && "cursor-not-allowed opacity-50"
+            )}
+          >
+            <DashboardCheckbox
+              checked={checked}
+              disabled={disabled || option.disabled}
+              onCheckedChange={(next) => toggle(option.value, next)}
+              aria-label={typeof option.label === "string" ? option.label : option.value}
+            />
+            <span className="truncate">{option.label}</span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 export function DashboardSwitch({
   checked,
   onCheckedChange,

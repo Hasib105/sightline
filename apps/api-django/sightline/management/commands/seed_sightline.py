@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import date
 from pathlib import Path
 
 from django.conf import settings
@@ -518,8 +519,12 @@ class Command(BaseCommand):
         eee, _ = Department.objects.get_or_create(code="EEE", defaults={"name": "Electrical and Electronic Engineering"})
         semester, _ = Semester.objects.get_or_create(
             name="Spring 2026",
-            defaults={"starts_on": now.date().replace(month=1, day=15), "ends_on": now.date().replace(month=5, day=30)},
+            defaults={"starts_on": date(2026, 1, 15), "ends_on": date(2026, 4, 30)},
         )
+        if semester.starts_on.month != 1:
+            semester.starts_on = date(2026, 1, 15)
+            semester.ends_on = date(2026, 4, 30)
+            semester.save(update_fields=["starts_on", "ends_on", "updated_at"])
         algorithms, _ = Course.objects.get_or_create(
             semester=semester,
             code="CSE-321",
@@ -582,6 +587,21 @@ class Command(BaseCommand):
                         "Farhan",
                         "Lamia",
                         "Sohan",
+                        "Tanisha",
+                        "Imran",
+                        "Priya",
+                        "Kamal",
+                        "Shila",
+                        "Omar",
+                        "Dipa",
+                        "Rashed",
+                        "Nila",
+                        "Sajid",
+                        "Pori",
+                        "Habib",
+                        "Tisha",
+                        "Noman",
+                        "Rina",
                     ],
                     start=1,
                 )
@@ -647,6 +667,65 @@ class Command(BaseCommand):
 
         hall_a, _ = Hall.objects.get_or_create(name="Hall A", defaults={"building": "Academic Block", "capacity": 96})
         hall_b, _ = Hall.objects.get_or_create(name="Hall B", defaults={"building": "Engineering Annex", "capacity": 64})
+        for room_number in range(101, 111):
+            Hall.objects.get_or_create(
+                name=f"Room {room_number}",
+                defaults={"building": "Main Campus", "capacity": 48 + (room_number % 5) * 8},
+            )
+
+        extra_course_titles = [
+            "Operating Systems",
+            "Computer Networks",
+            "Software Engineering",
+            "Machine Learning",
+            "Web Technologies",
+            "Discrete Mathematics",
+            "Digital Logic Design",
+            "Signals and Systems",
+            "Power Electronics",
+            "Control Systems",
+            "Data Mining",
+            "Cloud Computing",
+            "Mobile Application Development",
+            "Compiler Design",
+            "Computer Graphics",
+            "Information Security",
+            "Embedded Systems",
+            "Microprocessors",
+            "Numerical Methods",
+            "Linear Algebra",
+            "Probability and Statistics",
+            "Technical Communication",
+            "Professional Ethics",
+            "Project Management",
+            "Research Methods",
+            "Distributed Systems",
+            "Human Computer Interaction",
+            "Robotics Fundamentals",
+            "VLSI Design",
+            "Wireless Communication",
+            "Renewable Energy Systems",
+            "Industrial Electronics",
+            "Object Oriented Programming",
+            "Structured Programming",
+            "Theory of Computation",
+        ]
+        dept_cycle = [cse, eee, cse, cse, eee]
+        teacher_users = [users["teacher"], users["teacher2"], users["teacher3"], users["teacher4"], users["teacher5"]]
+        seeded_courses = [algorithms, databases, circuits, python_course]
+        for index, title in enumerate(extra_course_titles, start=1):
+            dept = dept_cycle[index % len(dept_cycle)]
+            prefix = dept.code
+            code = f"{prefix}-{200 + index}"
+            course, _ = Course.objects.get_or_create(
+                semester=semester,
+                code=code,
+                defaults={"department": dept, "title": title, "teacher": teacher_users[index % len(teacher_users)]},
+            )
+            if not course.teacher_id:
+                course.teacher = teacher_users[index % len(teacher_users)]
+                course.save(update_fields=["teacher", "updated_at"])
+            seeded_courses.append(course)
         for label in ["A1", "A2", "A3", "B1", "B2", "B3"]:
             Seat.objects.get_or_create(hall=hall_a, label=label, defaults={"region": f"Desk cluster {label[0]}"})
         for label in ["C1", "C2", "C3"]:
@@ -786,7 +865,7 @@ class Command(BaseCommand):
 
         students = []
         student_index = {}
-        for index in range(1, 21):
+        for index in range(1, 36):
             username = "student" if index == 1 else f"student{index:02d}"
             user = users[username]
             number = f"S-{1000 + index}"
@@ -797,7 +876,7 @@ class Command(BaseCommand):
                     "user": user,
                     "department": cse,
                     "full_name": f"{user.first_name} Student",
-                    "cohort": "2023-CSE-A" if index <= 10 else "2023-CSE-B",
+                    "cohort": "2023-CSE-A" if index <= 18 else "2023-CSE-B",
                     "previous_gpa": Decimal(str(round(1.3 + ability * 2.6, 2))),
                 },
             )

@@ -31,7 +31,7 @@ from .models import (
     StudentRiskScore,
     UserProfile,
 )
-from .services import calculate_risk_run, scheduling_conflicts
+from .services import calculate_risk_run, course_for_import, default_course_for_risk, reset_course_risk_data, scheduling_conflicts
 
 
 def role_permissions(role):
@@ -659,18 +659,69 @@ class StudentRiskScoreSerializer(serializers.ModelSerializer):
         ]
 
 
+class AcademicRecordImportSerializer(serializers.ModelSerializer):
+    uploaded_by_username = serializers.CharField(source="uploaded_by.username", read_only=True)
+
+    class Meta:
+        model = AcademicRecordImport
+        fields = [
+            "id",
+            "source_name",
+            "status",
+            "issue_summary",
+            "imported_rows",
+            "uploaded_by_username",
+            "created_at",
+        ]
+
+
 class AtRiskRunSerializer(serializers.Serializer):
     course = serializers.PrimaryKeyRelatedField(queryset=Course.objects.all())
-    source_name = serializers.CharField(default="manual-risk-input")
-    rows = serializers.ListField(child=serializers.DictField(), allow_empty=False)
+    source_name = serializers.CharField(default="manual-risk-input", required=False)
+    rows = serializers.ListField(child=serializers.DictField(), required=False, allow_empty=True)
+    import_id = serializers.IntegerField(required=False, allow_null=True)
+
+    def _request_is_admin(self):
+        request = self.context["request"]
+        user = request_user(request)
+        profile = getattr(user, "sightline_profile", None) if user else None
+        return bool(user and user.is_authenticated and (user.is_superuser or (profile and profile.role == UserProfile.ROLE_ADMIN)))
+
+    def validate(self, attrs):
+        import_id = attrs.get("import_id")
+        rows = attrs.get("rows") or []
+        if import_id and rows:
+            raise serializers.ValidationError({"detail": "Provide either import_id or rows, not both."})
+        if not import_id and not rows:
+            raise serializers.ValidationError({"detail": "Upload rows or select an existing import."})
+
+        request = self.context["request"]
+        user = request_user(request)
+        admin = self._request_is_admin()
+        course = attrs["course"]
+        if not admin and course.teacher_id and course.teacher_id != user.id:
+            raise serializers.ValidationError({"detail": "Teachers can run risk checks only for their own courses."})
+        return attrs
 
     def create(self, validated_data):
         request = self.context["request"]
         course = validated_data["course"]
+        import_id = validated_data.get("import_id")
+        if import_id:
+            record_import = AcademicRecordImport.objects.filter(id=import_id).first()
+            if not record_import:
+                raise serializers.ValidationError({"import_id": "Import not found."})
+            if record_import.status != AcademicRecordImport.STATUS_VALIDATED:
+                raise serializers.ValidationError({"import_id": "Only validated imports can be reused."})
+            has_course_data = AttendanceRecord.objects.filter(source_import=record_import, course=course).exists()
+            if not has_course_data:
+                raise serializers.ValidationError({"import_id": "This import has no data for the active course."})
+            return calculate_risk_run(record_import, course)
+
         record_import = AcademicRecordImport.objects.create(
             semester=course.semester,
             uploaded_by=request_user(request),
-            source_name=validated_data["source_name"],
+            source_name=validated_data.get("source_name") or "manual-risk-input",
             status=AcademicRecordImport.STATUS_VALIDATED,
             imported_rows=len(validated_data["rows"]),
         )
@@ -696,6 +747,52 @@ class AtRiskRunSerializer(serializers.Serializer):
                 max_score=max(assessment.get("max_score", row.get("max_score", row.get("maxScore", 100))), 1),
             )
         return calculate_risk_run(record_import, course)
+
+
+class ScheduleGenerateSerializer(serializers.Serializer):
+    courses = serializers.ListField(child=serializers.IntegerField(), allow_empty=False)
+    week_start = serializers.DateField(required=False, allow_null=True)
+    term_start = serializers.DateField(required=False, allow_null=True)
+    term_end = serializers.DateField(required=False, allow_null=True)
+    kind = serializers.ChoiceField(choices=ScheduledSession.KIND_CHOICES, default=ScheduledSession.KIND_CLASS)
+    teaching_weekdays = serializers.ListField(
+        child=serializers.IntegerField(min_value=0, max_value=6),
+        required=False,
+        default=list,
+    )
+    weekend_days = serializers.ListField(
+        child=serializers.IntegerField(min_value=0, max_value=6),
+        required=False,
+        default=list,
+    )
+    day_start_hour = serializers.IntegerField(min_value=6, max_value=14, required=False, default=8)
+    day_end_hour = serializers.IntegerField(min_value=12, max_value=22, required=False, default=16)
+    class_duration_minutes = serializers.IntegerField(min_value=30, max_value=180, required=False, default=90)
+    classes_per_week = serializers.IntegerField(min_value=1, max_value=6, required=False, default=3)
+    optimize_conflicts = serializers.BooleanField(required=False, default=True)
+    max_conflict_ratio = serializers.FloatField(min_value=0.0, max_value=0.25, required=False, default=0.05)
+    shuffle_seed = serializers.IntegerField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        if not attrs.get("week_start") and not (attrs.get("term_start") and attrs.get("term_end")):
+            raise serializers.ValidationError(
+                {"term_start": "Set semester from/to dates to generate across the term."}
+            )
+        if attrs.get("term_start") and attrs.get("term_end") and attrs["term_end"] < attrs["term_start"]:
+            raise serializers.ValidationError({"term_end": "Semester end must be on or after the start date."})
+        return attrs
+
+
+class RiskResetSerializer(serializers.Serializer):
+    course = serializers.PrimaryKeyRelatedField(queryset=Course.objects.all())
+
+
+class ScheduleBulkCreateSerializer(serializers.Serializer):
+    sessions = serializers.ListField(child=serializers.DictField(), allow_empty=False)
+
+
+class ScheduleClearSerializer(serializers.Serializer):
+    courses = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
 
 
 class FacultyActionLogSerializer(serializers.ModelSerializer):

@@ -48,6 +48,19 @@ def load_detector(model_size: str | None = None) -> Detector:
     return _DETECTORS[size]
 
 
+def warmup_detector(model_size: str | None = None) -> str:
+    """Load YOLO/MediaPipe models and run one tiny inference so the first real frame is fast."""
+    import numpy as np
+
+    detector = load_detector(model_size)
+    try:
+        rgb = np.zeros((96, 96, 3), dtype=np.uint8)
+        detector.detect(rgb)
+    except Exception:
+        pass
+    return detector.model_label
+
+
 def process_video(
     video_path: str | Path,
     video_name: str,
