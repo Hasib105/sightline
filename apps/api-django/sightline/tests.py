@@ -39,6 +39,9 @@ class SightlineApiSmokeTests(TestCase):
         call_command("seed_sightline", verbosity=0, skip_vector_index=True)
 
     def setUp(self):
+        from . import tasks
+
+        tasks._analysis_futures.clear()
         self.client = Client()
         self.temp_dir = TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.temp_dir.cleanup)
@@ -790,8 +793,8 @@ class SightlineApiSmokeTests(TestCase):
             data={
                 "courses": [course.id],
                 "week_start": week_start.isoformat(),
-                "term_start": "2026-01-15",
-                "term_end": "2026-04-30",
+                "term_start": "2026-06-01",
+                "term_end": "2026-08-31",
                 "kind": "class",
             },
             content_type="application/json",
