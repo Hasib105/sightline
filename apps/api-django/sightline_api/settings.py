@@ -153,6 +153,15 @@ CHANNEL_LAYERS = {
     }
 }
 
+_channel_redis_url = os.environ.get("CHANNEL_LAYER_REDIS_URL", "").strip()
+if _channel_redis_url:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {"hosts": [_channel_redis_url]},
+        }
+    }
+
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_TASK_ALWAYS_EAGER = os.environ.get("CELERY_TASK_ALWAYS_EAGER", "0").lower() in {"1", "true", "yes"}
 SIGHTLINE_ANALYSIS_WORKERS = int(os.environ.get("SIGHTLINE_ANALYSIS_WORKERS", "1"))

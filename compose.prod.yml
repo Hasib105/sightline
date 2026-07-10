@@ -58,7 +58,9 @@ services:
       QDRANT_URL: http://qdrant:6333
       SIGHTLINE_DEBUG: "0"
       SIGHTLINE_COLLECTSTATIC: "1"
-      SIGHTLINE_ANALYSIS_THREAD_FALLBACK: "0"
+      SIGHTLINE_ANALYSIS_USE_CELERY: "0"
+      SIGHTLINE_ANALYSIS_THREAD_FALLBACK: "1"
+      CHANNEL_LAYER_REDIS_URL: redis://redis:6379/1
       EXAM_AI_MODEL_DIR: /app/apps/api-django/sightline/exam_detection/models
       EXAM_AI_MODEL_SIZE: ${EXAM_AI_MODEL_SIZE:-s}
     volumes:

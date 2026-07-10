@@ -103,11 +103,28 @@ def warmup_exam_detection_models() -> bool:
 
 
 def queue_exam_video_analysis(video_id):
+    from .models import ExamVideo, ExamVideoAnalysisResult
+
+    video = ExamVideo.objects.filter(id=video_id).first()
+    if video is not None:
+        ExamVideoAnalysisResult.objects.update_or_create(
+            exam_video=video,
+            defaults={"latest_status": "Starting analysis..."},
+        )
+
     if not _celery_broker_reachable():
+        return _queue_threaded_analysis(video_id)
+
+    use_celery = getattr(settings, "SIGHTLINE_ANALYSIS_USE_CELERY", None)
+    if use_celery is False:
         return _queue_threaded_analysis(video_id)
 
     try:
         result = analyze_exam_video_task.delay(video_id)
+        if video is not None:
+            ExamVideoAnalysisResult.objects.filter(exam_video=video).update(
+                latest_status="Queued for analysis worker..."
+            )
         return {"mode": "celery", "task_id": result.id}
     except Exception:
         if not getattr(settings, "SIGHTLINE_ANALYSIS_THREAD_FALLBACK", True):
@@ -133,8 +150,17 @@ def _run_threaded_analysis(video_id):
         from .video_analysis import analyze_exam_video
 
         analyze_exam_video(video_id)
-    except Exception:
+    except Exception as exc:
         logger.exception("Threaded exam video analysis failed for video %s", video_id)
+        from django.utils import timezone
+
+        from .models import ExamVideo
+
+        ExamVideo.objects.filter(id=video_id, status=ExamVideo.STATUS_ANALYZING).update(
+            status=ExamVideo.STATUS_FAILED,
+            error_message=str(exc)[:500],
+            analysis_completed_at=timezone.now(),
+        )
     finally:
         with _analysis_lock:
             _analysis_futures.pop(video_id, None)

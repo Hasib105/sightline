@@ -45,7 +45,9 @@ services:
       SIGHTLINE_CSRF_TRUSTED_ORIGINS: http://localhost,http://127.0.0.1,http://localhost:3000,http://127.0.0.1:3000
       SIGHTLINE_DEBUG: "1"
       SIGHTLINE_SECRET_KEY: dev-only-sightline-secret
-      SIGHTLINE_ANALYSIS_THREAD_FALLBACK: "0"
+      SIGHTLINE_ANALYSIS_USE_CELERY: "0"
+      SIGHTLINE_ANALYSIS_THREAD_FALLBACK: "1"
+      CHANNEL_LAYER_REDIS_URL: redis://redis:6379/1
       EXAM_AI_MODEL_DIR: /app/apps/api-django/sightline/exam_detection/models
       EXAM_AI_MODEL_SIZE: s
     depends_on:
