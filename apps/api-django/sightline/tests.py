@@ -1,4 +1,5 @@
 import os
+import time
 from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -814,6 +815,53 @@ class SightlineApiSmokeTests(TestCase):
         self.assertEqual(bulk_response.status_code, 201)
         self.assertEqual(len(bulk_response.json()), len(suggestions))
         self.assertTrue(ScheduledSession.objects.filter(course=course, hall_id=suggestions[0]["hall"]).exists())
+
+    def test_admin_can_generate_semester_schedule_for_all_courses_quickly(self):
+        self.assertTrue(self.client.login(username="admin", password="sightline"))
+        ScheduledSession.objects.all().delete()
+        course_ids = list(Course.objects.values_list("id", flat=True))
+        self.assertGreaterEqual(len(course_ids), 2)
+
+        started = time.monotonic()
+        generate_response = self.client.post(
+            "/api/v1/schedules/generate",
+            data={
+                "courses": course_ids,
+                "term_start": "2026-01-15",
+                "term_end": "2026-04-30",
+                "kind": "class",
+                "teaching_weekdays": [0, 1, 2, 3],
+                "weekend_days": [4, 5],
+                "classes_per_week": 3,
+            },
+            content_type="application/json",
+        )
+        elapsed = time.monotonic() - started
+
+        self.assertEqual(generate_response.status_code, 200)
+        self.assertGreater(generate_response.json()["count"], 0)
+        self.assertLess(elapsed, 30, "Semester schedule generation should finish within 30 seconds")
+
+    def test_teacher_can_delete_own_schedule_but_not_other_teachers(self):
+        self.assertTrue(self.client.login(username="teacher", password="sightline"))
+        own_course = Course.objects.get(code="CSE-321")
+        own_session = ScheduledSession.objects.filter(course=own_course).first()
+        self.assertIsNotNone(own_session)
+
+        own_delete = self.client.delete(f"/api/v1/schedules/{own_session.id}")
+        self.assertEqual(own_delete.status_code, 200)
+        self.assertFalse(ScheduledSession.objects.filter(id=own_session.id).exists())
+
+        other_session = ScheduledSession.objects.exclude(course__teacher__username="teacher").first()
+        self.assertIsNotNone(other_session)
+        other_delete = self.client.delete(f"/api/v1/schedules/{other_session.id}")
+        self.assertEqual(other_delete.status_code, 403)
+        self.assertTrue(ScheduledSession.objects.filter(id=other_session.id).exists())
+
+        list_response = self.client.get("/api/v1/schedules")
+        self.assertEqual(list_response.status_code, 200)
+        listed_course_ids = {item["course"] for item in list_response.json()}
+        self.assertTrue(all(Course.objects.get(id=course_id).teacher.username == "teacher" for course_id in listed_course_ids))
 
     def test_teacher_can_reset_risk_data_and_reupload(self):
         self.assertTrue(self.client.login(username="teacher", password="sightline"))

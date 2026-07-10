@@ -50,7 +50,13 @@ from .models import (
     UserProfile,
 )
 from . import predict
-from .course_rag import answer_course_question, index_course, remove_material_index, stream_course_question_events
+from .course_rag import (
+    answer_course_question,
+    index_course,
+    remove_material_index,
+    stream_course_question_events,
+    _stream_course_question_fallback,
+)
 from .services import (
     ACADEMIC_HOLIDAYS,
     DEFAULT_TEACHING_WEEKDAYS,
@@ -131,8 +137,9 @@ def _course_chat_stream_response(thread, question):
             for event in stream_course_question_events(thread, question):
                 yield _sse_event(event)
         except Exception:
-            logger.exception("Course chat streaming failed.")
-            yield _sse_event({"event": "error", "detail": "Unable to answer right now."})
+            logger.exception("Course chat streaming failed; serving fallback response.")
+            for event in _stream_course_question_fallback(thread, question):
+                yield _sse_event(event)
 
     response = StreamingHttpResponse(generate_events(), content_type="text/event-stream")
     response["Cache-Control"] = "no-cache, no-transform"
@@ -159,6 +166,23 @@ def user_role(request):
 
 def has_role(request, *roles):
     return is_admin_request(request) or user_role(request) in roles
+
+
+def can_manage_schedule(request, session):
+    if not is_authenticated_request(request):
+        return False
+    if is_admin_request(request):
+        return True
+    if user_role(request) == UserProfile.ROLE_TEACHER:
+        return session.course.teacher_id == django_user(request).id
+    return False
+
+
+def schedules_queryset_for_request(request):
+    queryset = ScheduledSession.objects.select_related("course", "hall", "invigilator").order_by("starts_at")
+    if user_role(request) == UserProfile.ROLE_TEACHER and not is_admin_request(request):
+        queryset = queryset.filter(course__teacher=django_user(request))
+    return queryset
 
 
 def can_view_course(request, course):
@@ -411,6 +435,46 @@ class ScheduleClearView(SessionlessAPIView):
                 "message": f"Deleted {deleted_count} scheduled session(s). Generate a new plan when ready.",
             }
         )
+
+
+class ScheduleDetailView(SessionlessAPIView):
+    def get_session(self, session_id):
+        return ScheduledSession.objects.select_related("course", "hall", "invigilator").filter(id=session_id).first()
+
+    def patch(self, request, session_id):
+        if not is_authenticated_request(request):
+            return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not has_role(request, UserProfile.ROLE_TEACHER):
+            return Response({"detail": "Only teachers or admins can manage schedules."}, status=status.HTTP_403_FORBIDDEN)
+        session = self.get_session(session_id)
+        if not session:
+            return Response({"detail": "Scheduled session not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not can_manage_schedule(request, session):
+            return Response(
+                {"detail": "Teachers can only manage schedules for their own courses."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        serializer = serializers.ScheduledSessionSerializer(session, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        session = serializer.save()
+        return Response(serializers.ScheduledSessionSerializer(session).data)
+
+    def delete(self, request, session_id):
+        if not is_authenticated_request(request):
+            return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not has_role(request, UserProfile.ROLE_TEACHER):
+            return Response({"detail": "Only teachers or admins can manage schedules."}, status=status.HTTP_403_FORBIDDEN)
+        session = self.get_session(session_id)
+        if not session:
+            return Response({"detail": "Scheduled session not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not can_manage_schedule(request, session):
+            return Response(
+                {"detail": "Teachers can only manage schedules for their own courses."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        record_id = session.id
+        session.delete()
+        return Response({"deleted": True, "record_id": record_id})
 
 
 class ApiV1DispatchView(SessionlessAPIView):
@@ -1198,7 +1262,7 @@ class ApiV1DispatchView(SessionlessAPIView):
             if auth_error:
                 return auth_error
             if request.method == "GET":
-                queryset = ScheduledSession.objects.select_related("course", "hall", "invigilator").order_by("starts_at")
+                queryset = schedules_queryset_for_request(request)
                 kind = request.GET.get("kind")
                 if kind:
                     queryset = queryset.filter(kind=kind)
@@ -1223,20 +1287,13 @@ class ApiV1DispatchView(SessionlessAPIView):
                 if parts[1] in {"generate", "bulk", "clear", "conflicts", "my"}:
                     return Response({"detail": f"Schedule endpoint /{parts[1]} is registered separately."}, status=status.HTTP_404_NOT_FOUND)
                 return Response({"detail": "Invalid schedule route."}, status=status.HTTP_404_NOT_FOUND)
-            session = ScheduledSession.objects.filter(id=int(parts[1])).first()
-            if not session:
-                return Response({"detail": "Scheduled session not found."}, status=status.HTTP_404_NOT_FOUND)
-            if not has_role(request, UserProfile.ROLE_TEACHER):
-                return Response({"detail": "Only teachers or admins can manage schedules."}, status=status.HTTP_403_FORBIDDEN)
+            session_id = int(parts[1])
+            detail_view = ScheduleDetailView()
             if request.method in {"PATCH", "PUT"}:
-                serializer = serializers.ScheduledSessionSerializer(session, data=request.data, partial=True)
-                serializer.is_valid(raise_exception=True)
-                session = serializer.save()
-                return Response(serializers.ScheduledSessionSerializer(session).data)
+                return detail_view.patch(request, session_id)
             if request.method == "DELETE":
-                record_id = session.id
-                session.delete()
-                return Response({"deleted": True, "record_id": record_id})
+                return detail_view.delete(request, session_id)
+            return Response({"detail": "Method not allowed."}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
         return self.compatibility_response(request, clean_path)
 

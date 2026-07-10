@@ -10,6 +10,7 @@ uvicorn[standard]>=0.34,<1.0
 numpy>=1.26,<2.0
 opencv-python-headless>=4.10,<5.0
 ultralytics>=8.2,<9.0
+matplotlib>=3.8,<3.11
 lap>=0.5.12
 mediapipe==0.10.21
 langchain>=1.0,<2.0

@@ -577,8 +577,24 @@ class Command(BaseCommand):
             action="store_true",
             help="Create demo course records without indexing seeded Python content into Qdrant.",
         )
+        parser.add_argument(
+            "--if-empty",
+            action="store_true",
+            help="Skip seeding when MVP demo courses are already present in the database.",
+        )
 
     def handle(self, *args, **options):
+        mvp_codes = {spec["code"] for spec in MVP_COURSE_SPECS}
+        if options.get("if_empty"):
+            existing_count = Course.objects.filter(code__in=mvp_codes).count()
+            if existing_count >= len(mvp_codes):
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"Seed skipped: {existing_count} MVP courses already present in the database."
+                    )
+                )
+                return
+
         now = timezone.now()
 
         cse, _ = Department.objects.get_or_create(code="CSE", defaults={"name": "Computer Science and Engineering"})

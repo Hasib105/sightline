@@ -235,7 +235,13 @@ class Detector:
 
 
 def _load_yolo(model_name: str) -> Any:
-    from ultralytics import YOLO
+    try:
+        from ultralytics import YOLO
+    except ImportError as exc:
+        raise RuntimeError(
+            "Ultralytics YOLO is not available. Install project dependencies with "
+            "`pnpm run api:install` or `uv sync`, then restart the API."
+        ) from exc
 
     return YOLO(model_name)
 

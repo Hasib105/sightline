@@ -165,3 +165,8 @@ _use_celery_env = os.environ.get("SIGHTLINE_ANALYSIS_USE_CELERY", "").strip().lo
 SIGHTLINE_ANALYSIS_USE_CELERY = (
     None if not _use_celery_env else _use_celery_env in {"1", "true", "yes"}
 )
+SIGHTLINE_EXAM_DETECTION_WARMUP = os.environ.get("SIGHTLINE_EXAM_DETECTION_WARMUP", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+}

@@ -84,6 +84,9 @@ def _celery_broker_reachable() -> bool:
 
 def warmup_exam_detection_models() -> bool:
     global _warmup_done
+    if not getattr(settings, "SIGHTLINE_EXAM_DETECTION_WARMUP", True):
+        logger.info("Exam detection warmup disabled (SIGHTLINE_EXAM_DETECTION_WARMUP=0).")
+        return False
     with _warmup_lock:
         if _warmup_done:
             return True
@@ -94,8 +97,8 @@ def warmup_exam_detection_models() -> bool:
             _warmup_done = True
             logger.info("Exam detection models warmed up.")
             return True
-        except Exception:
-            logger.exception("Exam detection model warmup failed.")
+        except Exception as exc:
+            logger.warning("Exam detection model warmup skipped: %s", exc)
             return False
 
 
@@ -138,6 +141,8 @@ def _run_threaded_analysis(video_id):
 
 
 def schedule_startup_warmup() -> None:
+    if not getattr(settings, "SIGHTLINE_EXAM_DETECTION_WARMUP", True):
+        return
     if any(command in sys.argv for command in ("migrate", "makemigrations", "test", "collectstatic", "shell")):
         return
     _analysis_executor.submit(warmup_exam_detection_models)

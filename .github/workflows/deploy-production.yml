@@ -350,6 +350,7 @@ jobs:
                   SIGHTLINE_DEBUG: "0"
                   SIGHTLINE_SKIP_MIGRATIONS: "1"
                   SIGHTLINE_COLLECTSTATIC: "0"
+                  SIGHTLINE_SEED_IF_EMPTY: "0"
                   SIGHTLINE_ANALYSIS_THREAD_FALLBACK: "0"
                   EXAM_AI_ANALYSIS_FPS: ${EXAM_AI_ANALYSIS_FPS:-2.0}
                   EXAM_AI_MODEL_SIZE: ${EXAM_AI_MODEL_SIZE:-s}
@@ -483,6 +484,8 @@ jobs:
             if [ -n "${DJANGO_SUPERUSER_PASSWORD:-}" ]; then
               $COMPOSE_CMD exec -T api python manage.py createsuperuser --noinput || true
             fi
+
+            $COMPOSE_CMD exec -T api python manage.py seed_sightline --if-empty || true
 
             docker system prune -af --filter "until=24h" || true
             $COMPOSE_CMD ps

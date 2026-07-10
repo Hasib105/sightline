@@ -231,8 +231,10 @@ export default function SchedulingPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteSchedule(id),
     onSuccess: async () => {
+      setMessage("Schedule deleted.");
       await queryClient.invalidateQueries({ queryKey: ["schedules"] });
     },
+    onError: (error) => setMessage(error instanceof Error ? error.message : "Unable to delete schedule."),
   });
 
   const clearAllMutation = useMutation({

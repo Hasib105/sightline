@@ -15,6 +15,7 @@ urlpatterns = [
     path("api/v1/schedules/generate", views.ScheduleGenerateView.as_view()),
     path("api/v1/schedules/bulk", views.ScheduleBulkView.as_view()),
     path("api/v1/schedules/clear", views.ScheduleClearView.as_view()),
+    path("api/v1/schedules/<int:session_id>", views.ScheduleDetailView.as_view()),
     path("api/v1/", views.ApiV1DispatchView.as_view()),
     path("api/v1/<path:path>", views.ApiV1DispatchView.as_view()),
     path("api/", include("sightline.urls")),

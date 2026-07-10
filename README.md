@@ -149,6 +149,8 @@ Start both apps:
 pnpm run dev
 ```
 
+Always run the API through `pnpm run api:dev`, `pnpm run api:runserver`, or `uv run` so Python dependencies resolve from the project virtualenv (`.venv`). Do not start Django with system Python (`python manage.py runserver`) — ML dependencies such as `matplotlib` and `ultralytics` may fail or destabilize the API.
+
 Open:
 
 - Web app: `http://localhost:3000`
@@ -165,11 +167,15 @@ Demo users all use password `sightline`:
 Useful local commands:
 
 ```bash
+pnpm run api:dev
+pnpm run api:runserver
 pnpm run api:migrate
 pnpm run api:seed
 pnpm run web:lint
 pnpm run web:build
 ```
+
+To disable exam-detection model warmup on startup (for example when ML deps are unavailable), set `SIGHTLINE_EXAM_DETECTION_WARMUP=0` in `.env`.
 
 ## Running With Docker
 

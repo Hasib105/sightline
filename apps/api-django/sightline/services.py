@@ -415,6 +415,113 @@ class _ScheduleOccupancy:
         self._blocks.append((hall_id, starts_at, ends_at, invigilator_id))
 
 
+class _ScheduleConflictIndex:
+    """In-memory conflict index for schedule generation (avoids per-candidate DB hits)."""
+
+    def __init__(self, course_ids, term_start=None, term_end=None):
+        range_start = None
+        range_end = None
+        if term_start:
+            start_date = term_start.date() if isinstance(term_start, datetime) else term_start
+            range_start = _campus_datetime(start_date, 0, 0)
+        if term_end:
+            end_date = term_end.date() if isinstance(term_end, datetime) else term_end
+            range_end = _campus_datetime(end_date, 23, 59)
+
+        queryset = ScheduledSession.objects.select_related("course", "hall", "invigilator")
+        if range_start:
+            queryset = queryset.filter(ends_at__gte=range_start)
+        if range_end:
+            queryset = queryset.filter(starts_at__lte=range_end)
+
+        self._sessions_by_day: dict[date, list[dict]] = {}
+        for session in queryset:
+            self._register_session(
+                {
+                    "id": session.id,
+                    "hall_id": session.hall_id,
+                    "hall_name": session.hall.name,
+                    "course_id": session.course_id,
+                    "course_code": session.course.code,
+                    "invigilator_id": session.invigilator_id,
+                    "starts_at": session.starts_at,
+                    "ends_at": session.ends_at,
+                }
+            )
+        tracked_course_ids = set(course_ids)
+        for sessions in self._sessions_by_day.values():
+            for session in sessions:
+                tracked_course_ids.add(session["course_id"])
+        self._students_by_course = {
+            course_id: set(
+                CourseEnrollment.objects.filter(
+                    course_id=course_id,
+                    status=CourseEnrollment.STATUS_ACTIVE,
+                ).values_list("student_id", flat=True)
+            )
+            for course_id in tracked_course_ids
+        }
+
+    def _register_session(self, session):
+        day_key = session["starts_at"].date()
+        self._sessions_by_day.setdefault(day_key, []).append(session)
+
+    def add_planned(self, hall, course, invigilator_id, starts_at, ends_at):
+        self._register_session(
+            {
+                "id": None,
+                "hall_id": hall.id,
+                "hall_name": hall.name,
+                "course_id": course.id,
+                "course_code": course.code,
+                "invigilator_id": invigilator_id,
+                "starts_at": starts_at,
+                "ends_at": ends_at,
+            }
+        )
+
+    def score_placement(self, occupancy, hall, starts_at, ends_at, invigilator_id, course_id):
+        if occupancy.room_busy(hall.id, starts_at, ends_at):
+            return None
+        if occupancy.invigilator_busy(invigilator_id, starts_at, ends_at):
+            return None
+
+        conflicts = []
+        student_ids = self._students_by_course.get(course_id, set())
+        for session in self._sessions_by_day.get(starts_at.date(), ()):
+            if not _ScheduleOccupancy._overlaps(starts_at, ends_at, session["starts_at"], session["ends_at"]):
+                continue
+            if session["hall_id"] == hall.id:
+                conflicts.append(
+                    {
+                        "type": "room",
+                        "message": f"Room {session['hall_name']} is already booked for {session['course_code']}",
+                        "session_id": session["id"],
+                    }
+                )
+            if invigilator_id and session["invigilator_id"] == invigilator_id:
+                conflicts.append(
+                    {
+                        "type": "invigilator",
+                        "message": f"Invigilator already assigned to {session['course_code']}",
+                        "session_id": session["id"],
+                    }
+                )
+            if student_ids and session["course_id"] != course_id:
+                clashing = len(student_ids & self._students_by_course.get(session["course_id"], set()))
+                if clashing:
+                    conflicts.append(
+                        {
+                            "type": "student",
+                            "message": (
+                                f"{clashing} enrolled student(s) also have {session['course_code']} at this time"
+                            ),
+                            "session_id": session["id"],
+                        }
+                    )
+        return len(conflicts), conflicts
+
+
 def _all_term_teaching_days(
     week_starts,
     teaching_weekdays,
@@ -447,79 +554,27 @@ def _shuffled_indices(count, rng):
     return indices
 
 
-def _score_placement(occupancy, hall, starts_at, ends_at, invigilator_id, course_id):
-    if occupancy.room_busy(hall.id, starts_at, ends_at):
-        return None
-    if occupancy.invigilator_busy(invigilator_id, starts_at, ends_at):
-        return None
-    conflicts = scheduling_conflicts(
-        hall.id,
-        starts_at,
-        ends_at,
-        invigilator_id=invigilator_id,
-        course_id=course_id,
-    )
-    return len(conflicts), conflicts
+def _score_placement(occupancy, hall, starts_at, ends_at, invigilator_id, course_id, conflict_index):
+    return conflict_index.score_placement(occupancy, hall, starts_at, ends_at, invigilator_id, course_id)
 
 
-def _place_best_session(
+def _append_planned_session(
     suggestions,
     occupancy,
+    conflict_index,
     *,
     kind,
     course,
-    halls,
-    hall_order,
-    slot_times,
-    slot_order,
-    day_candidates,
-    duration,
-    day_end_hour,
+    hall,
+    starts_at,
+    ends_at,
     invigilator_id,
     session_index,
-    conflict_budget,
-    optimize_conflicts,
-    rng,
+    conflicts,
+    conflict_count,
 ):
-    ranked = []
-    for day_date in day_candidates:
-        for slot_idx in slot_order:
-            hour, minute = slot_times[slot_idx]
-            starts_at = _campus_datetime(day_date, hour, minute)
-            ends_at = starts_at + duration
-            if not _fits_campus_hours(starts_at, ends_at, day_end_hour):
-                continue
-            for hall_idx in hall_order:
-                hall = halls[hall_idx]
-                scored = _score_placement(occupancy, hall, starts_at, ends_at, invigilator_id, course.id)
-                if scored is None:
-                    continue
-                conflict_count, conflicts = scored
-                ranked.append(
-                    (conflict_count, day_date, hall, starts_at, ends_at, invigilator_id, conflicts, slot_idx, hall_idx)
-                )
-
-    if not ranked:
-        return False
-
-    ranked.sort(key=lambda item: (item[0], rng.random()))
-    clean = [item for item in ranked if item[0] == 0]
-
-    if optimize_conflicts:
-        if clean:
-            pick = rng.choice(clean) if len(clean) > 1 else clean[0]
-        elif conflict_budget[0] > 0:
-            pick = ranked[0]
-            conflict_budget[0] -= 1
-        else:
-            return False
-    else:
-        if not clean:
-            return False
-        pick = rng.choice(clean) if len(clean) > 1 else clean[0]
-
-    conflict_count, _day_date, hall, starts_at, ends_at, invigilator_id, conflicts, _slot_idx, _hall_idx = pick
     occupancy.reserve(hall.id, starts_at, ends_at, invigilator_id)
+    conflict_index.add_planned(hall, course, invigilator_id, starts_at, ends_at)
     label = "Exam" if kind == ScheduledSession.KIND_EXAM else f"Class {session_index + 1}"
     suggestions.append(
         {
@@ -536,7 +591,95 @@ def _place_best_session(
             "conflicts": conflicts if conflict_count else [],
         }
     )
-    return True
+
+
+def _place_best_session(
+    suggestions,
+    occupancy,
+    conflict_index,
+    *,
+    kind,
+    course,
+    halls,
+    hall_order,
+    slot_times,
+    slot_order,
+    day_candidates,
+    duration,
+    day_end_hour,
+    invigilator_id,
+    session_index,
+    conflict_budget,
+    optimize_conflicts,
+    rng,
+):
+    best_conflict = None
+    best_pick = None
+    for day_date in day_candidates:
+        for slot_idx in slot_order:
+            hour, minute = slot_times[slot_idx]
+            starts_at = _campus_datetime(day_date, hour, minute)
+            ends_at = starts_at + duration
+            if not _fits_campus_hours(starts_at, ends_at, day_end_hour):
+                continue
+            for hall_idx in hall_order:
+                hall = halls[hall_idx]
+                scored = _score_placement(
+                    occupancy, hall, starts_at, ends_at, invigilator_id, course.id, conflict_index
+                )
+                if scored is None:
+                    continue
+                conflict_count, conflicts = scored
+                if conflict_count == 0:
+                    _append_planned_session(
+                        suggestions,
+                        occupancy,
+                        conflict_index,
+                        kind=kind,
+                        course=course,
+                        hall=hall,
+                        starts_at=starts_at,
+                        ends_at=ends_at,
+                        invigilator_id=invigilator_id,
+                        session_index=session_index,
+                        conflicts=conflicts,
+                        conflict_count=conflict_count,
+                    )
+                    return True
+                if best_conflict is None or conflict_count < best_conflict:
+                    best_conflict = conflict_count
+                    best_pick = (conflict_count, hall, starts_at, ends_at, invigilator_id, conflicts)
+
+    if optimize_conflicts and best_pick and conflict_budget[0] > 0:
+        conflict_count, hall, starts_at, ends_at, invigilator_id, conflicts = best_pick
+        conflict_budget[0] -= 1
+        _append_planned_session(
+            suggestions,
+            occupancy,
+            conflict_index,
+            kind=kind,
+            course=course,
+            hall=hall,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            invigilator_id=invigilator_id,
+            session_index=session_index,
+            conflicts=conflicts,
+            conflict_count=conflict_count,
+        )
+        return True
+    return False
+
+
+SCHEDULE_DAY_CANDIDATE_FALLBACK = 14
+
+
+def _day_candidates(preferred_days, all_term_days, rng):
+    preferred = list(dict.fromkeys(preferred_days))
+    preferred_set = set(preferred)
+    fallback = [day for day in all_term_days if day not in preferred_set]
+    rng.shuffle(fallback)
+    return list(dict.fromkeys(preferred + fallback[:SCHEDULE_DAY_CANDIDATE_FALLBACK]))
 
 
 def _teaching_days_in_week(
@@ -651,6 +794,7 @@ def generate_schedule_plan(
     conflict_budget = [math.ceil(sessions_target * max_conflict_ratio)] if optimize_conflicts else [0]
     suggestions = []
     occupancy = _ScheduleOccupancy()
+    conflict_index = _ScheduleConflictIndex(course_ids, term_start=term_start, term_end=term_end)
     skipped = 0
 
     for course_index, course in enumerate(courses):
@@ -672,13 +816,12 @@ def generate_schedule_plan(
                         term_end=term_end,
                     )
                 )
-            day_candidates = list(dict.fromkeys(exam_days))
-            rng.shuffle(day_candidates)
-            day_candidates.extend([day for day in all_term_days if day not in set(day_candidates)])
+            day_candidates = _day_candidates(exam_days, all_term_days, rng)
             invigilator_id = invigilators[course_index % len(invigilators)].id if invigilators else None
             if not _place_best_session(
                 suggestions,
                 occupancy,
+                conflict_index,
                 kind=kind,
                 course=course,
                 halls=halls,
@@ -720,13 +863,12 @@ def generate_schedule_plan(
                 preferred = [
                     week_day_dates[(day_rotation + attempt) % len(week_day_dates)] for attempt in range(len(week_day_dates))
                 ]
-                fallback = [day for day in all_term_days if day not in set(preferred)]
-                rng.shuffle(fallback)
-                day_candidates = list(dict.fromkeys(preferred + fallback))
+                day_candidates = list(dict.fromkeys(preferred))
 
                 if not _place_best_session(
                     suggestions,
                     occupancy,
+                    conflict_index,
                     kind=kind,
                     course=course,
                     halls=halls,

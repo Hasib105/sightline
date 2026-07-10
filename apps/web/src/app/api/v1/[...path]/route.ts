@@ -15,6 +15,10 @@ async function proxyApiV1(request: NextRequest, context: RouteContext) {
 
   headers.delete("host");
   headers.delete("content-length");
+  const cookie = request.headers.get("cookie");
+  if (cookie) {
+    headers.set("cookie", cookie);
+  }
 
   const upstream = await fetch(`${apiBaseUrl()}/api/v1/${targetPath}${search}`, {
     method: request.method,

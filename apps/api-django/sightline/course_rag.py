@@ -4,8 +4,8 @@ import logging
 import math
 import os
 import re
+import threading
 from contextlib import contextmanager
-from functools import lru_cache
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
@@ -30,7 +30,8 @@ logger = logging.getLogger(__name__)
 VECTOR_DIMENSIONS = 128
 DEFAULT_GROQ_CHAT_MODEL = "llama-3.3-70b-versatile"
 QDRANT_COLLECTION = "sightline_course_content"
-_qdrant_clients: set[QdrantClient] = set()
+_qdrant_lock = threading.Lock()
+_qdrant_client_singleton: QdrantClient | None = None
 COURSE_OUTLINE_TERMS = {
     "chapter",
     "chapters",
@@ -129,38 +130,76 @@ def _lexical_relevance(question: str, context: dict) -> int:
     return term_hits + phrase_boost
 
 
-@lru_cache(maxsize=None)
-def _qdrant_client(url: str, api_key: str, path_string: str) -> QdrantClient:
-    if url:
-        client = QdrantClient(url=url, api_key=api_key or None)
-    else:
-        path = Path(path_string)
-        path.mkdir(parents=True, exist_ok=True)
-        client = QdrantClient(path=str(path))
-    _qdrant_clients.add(client)
-    return client
+def _qdrant_local_path() -> Path:
+    configured = os.environ.get("SIGHTLINE_QDRANT_PATH", "").strip()
+    if configured:
+        return Path(configured)
+    return Path(settings.BASE_DIR) / "qdrant_data"
 
 
-@atexit.register
-def _close_qdrant_clients() -> None:
-    for client in tuple(_qdrant_clients):
-        client.close()
-    _qdrant_clients.clear()
-    _qdrant_client.cache_clear()
+def _create_local_qdrant(path: Path) -> QdrantClient:
+    resolved = path.resolve()
+    resolved.mkdir(parents=True, exist_ok=True)
+    try:
+        return QdrantClient(path=str(resolved))
+    except RuntimeError as exc:
+        message = str(exc).lower()
+        if "already accessed" in message or "storage folder" in message:
+            logger.warning(
+                "Local Qdrant storage at %s is locked by another process; using in-memory vector search.",
+                resolved,
+            )
+            return QdrantClient(location=":memory:")
+        raise
 
 
-def _qdrant() -> QdrantClient:
-    url = os.environ.get("QDRANT_URL", "").strip()
-    api_key = os.environ.get("QDRANT_API_KEY", "").strip()
-    default_path = Path(settings.BASE_DIR) / "qdrant"
-    path = os.environ.get("SIGHTLINE_QDRANT_PATH", str(default_path))
-    client = _qdrant_client(url, api_key, path)
+def _ensure_qdrant_collection(client: QdrantClient) -> QdrantClient:
     if not client.collection_exists(QDRANT_COLLECTION):
         client.create_collection(
             collection_name=QDRANT_COLLECTION,
             vectors_config=models.VectorParams(size=VECTOR_DIMENSIONS, distance=models.Distance.COSINE),
         )
     return client
+
+
+def _qdrant() -> QdrantClient | None:
+    global _qdrant_client_singleton
+    with _qdrant_lock:
+        try:
+            if _qdrant_client_singleton is not None:
+                return _ensure_qdrant_collection(_qdrant_client_singleton)
+
+            url = os.environ.get("QDRANT_URL", "").strip()
+            api_key = os.environ.get("QDRANT_API_KEY", "").strip()
+            local_path = _qdrant_local_path()
+
+            if url:
+                try:
+                    client = QdrantClient(url=url, api_key=api_key or None, timeout=3.0)
+                    client.get_collections()
+                    _qdrant_client_singleton = client
+                    return _ensure_qdrant_collection(_qdrant_client_singleton)
+                except Exception:
+                    logger.warning(
+                        "Qdrant unavailable at %s; using local persistent storage at %s",
+                        url,
+                        local_path,
+                    )
+
+            _qdrant_client_singleton = _create_local_qdrant(local_path)
+            return _ensure_qdrant_collection(_qdrant_client_singleton)
+        except Exception:
+            logger.warning("Qdrant client unavailable; course chat will use material text fallback.", exc_info=True)
+            _qdrant_client_singleton = None
+            return None
+
+
+@atexit.register
+def _close_qdrant_client() -> None:
+    global _qdrant_client_singleton
+    if _qdrant_client_singleton is not None:
+        _qdrant_client_singleton.close()
+        _qdrant_client_singleton = None
 
 
 def _material_filter(material: CourseMaterial) -> models.Filter:
@@ -204,44 +243,57 @@ def _material_text(material: CourseMaterial) -> str:
 
 
 def remove_material_index(material: CourseMaterial) -> None:
-    _qdrant().delete(
-        collection_name=QDRANT_COLLECTION,
-        points_selector=_material_filter(material),
-        wait=True,
-    )
+    client = _qdrant()
+    if client is None:
+        return
+    try:
+        client.delete(
+            collection_name=QDRANT_COLLECTION,
+            points_selector=_material_filter(material),
+            wait=True,
+        )
+    except Exception:
+        logger.warning("Could not remove Qdrant index for material %s", material.id, exc_info=True)
 
 
 def index_material(material: CourseMaterial) -> int:
     client = _qdrant()
+    if client is None:
+        return 0
+
     text = _material_text(material)
     chunks = _chunk_text(text)
-    client.delete(
-        collection_name=QDRANT_COLLECTION,
-        points_selector=_material_filter(material),
-        wait=True,
-    )
-
-    if chunks:
-        client.upsert(
+    try:
+        client.delete(
             collection_name=QDRANT_COLLECTION,
+            points_selector=_material_filter(material),
             wait=True,
-            points=[
-                models.PointStruct(
-                    id=str(uuid5(NAMESPACE_URL, f"sightline:material:{material.id}:chunk:{index}")),
-                    vector=_embed_text(chunk),
-                    payload={
-                        "course_id": str(material.course_id),
-                        "unit_id": str(material.unit_id or ""),
-                        "material_id": str(material.id),
-                        "title": material.title,
-                        "kind": material.kind,
-                        "uri": material.uri,
-                        "text": chunk,
-                    },
-                )
-                for index, chunk in enumerate(chunks)
-            ],
         )
+
+        if chunks:
+            client.upsert(
+                collection_name=QDRANT_COLLECTION,
+                wait=True,
+                points=[
+                    models.PointStruct(
+                        id=str(uuid5(NAMESPACE_URL, f"sightline:material:{material.id}:chunk:{index}")),
+                        vector=_embed_text(chunk),
+                        payload={
+                            "course_id": str(material.course_id),
+                            "unit_id": str(material.unit_id or ""),
+                            "material_id": str(material.id),
+                            "title": material.title,
+                            "kind": material.kind,
+                            "uri": material.uri,
+                            "text": chunk,
+                        },
+                    )
+                    for index, chunk in enumerate(chunks)
+                ],
+            )
+    except Exception:
+        logger.warning("Skipping vector indexing for material %s because Qdrant is unavailable.", material.id, exc_info=True)
+        return 0
 
     material.indexed_at = timezone.now()
     material.save(update_fields=["indexed_at", "updated_at"])
@@ -255,39 +307,12 @@ def index_course(course: Course) -> int:
     return count
 
 
-def retrieve_course_context(course: Course, question: str, unit: CourseUnit | None = None, limit: int = 5) -> list[dict]:
-    must = [
-        models.FieldCondition(
-            key="course_id",
-            match=models.MatchValue(value=str(course.id)),
-        )
-    ]
-    if unit:
-        must.append(
-            models.FieldCondition(
-                key="unit_id",
-                match=models.MatchValue(value=str(unit.id)),
-            )
-        )
-    result = _qdrant().query_points(
-        collection_name=QDRANT_COLLECTION,
-        query=_embed_text(question),
-        query_filter=models.Filter(must=must),
-        limit=max(limit * 8, 32),
-    )
-    if result.points:
-        contexts = [
-            {
-                "text": point.payload.get("text", ""),
-                "score": float(point.score),
-                "metadata": {key: value for key, value in point.payload.items() if key != "text"},
-            }
-            for point in result.points
-        ]
-        contexts.sort(key=lambda item: (_lexical_relevance(question, item), item["score"]), reverse=True)
-        return contexts[:limit]
-
-    # Keep local development usable while an uploaded material is waiting for its background indexing job.
+def _material_text_context(
+    course: Course,
+    question: str,
+    unit: CourseUnit | None = None,
+    limit: int = 5,
+) -> list[dict]:
     query_terms = set(_tokenize(question))
     materials = course.materials.select_related("unit").all()
     if unit:
@@ -299,6 +324,11 @@ def retrieve_course_context(course: Course, question: str, unit: CourseUnit | No
         if text:
             scored.append((score, material, text))
     scored.sort(key=lambda item: item[0], reverse=True)
+    if not scored and materials.exists():
+        for material in materials[:limit]:
+            text = _material_text(material)
+            if text:
+                scored.append((0, material, text))
     return [
         {
             "text": text[:900],
@@ -314,6 +344,46 @@ def retrieve_course_context(course: Course, question: str, unit: CourseUnit | No
         }
         for score, material, text in scored[:limit]
     ]
+
+
+def retrieve_course_context(course: Course, question: str, unit: CourseUnit | None = None, limit: int = 5) -> list[dict]:
+    try:
+        client = _qdrant()
+        if client is not None:
+            must = [
+                models.FieldCondition(
+                    key="course_id",
+                    match=models.MatchValue(value=str(course.id)),
+                )
+            ]
+            if unit:
+                must.append(
+                    models.FieldCondition(
+                        key="unit_id",
+                        match=models.MatchValue(value=str(unit.id)),
+                    )
+                )
+            result = client.query_points(
+                collection_name=QDRANT_COLLECTION,
+                query=_embed_text(question),
+                query_filter=models.Filter(must=must),
+                limit=max(limit * 8, 32),
+            )
+            if result.points:
+                contexts = [
+                    {
+                        "text": point.payload.get("text", ""),
+                        "score": float(point.score),
+                        "metadata": {key: value for key, value in point.payload.items() if key != "text"},
+                    }
+                    for point in result.points
+                ]
+                contexts.sort(key=lambda item: (_lexical_relevance(question, item), item["score"]), reverse=True)
+                return contexts[:limit]
+    except Exception:
+        logger.warning("Qdrant query failed for course %s; using material text fallback.", course.id, exc_info=True)
+
+    return _material_text_context(course, question, unit, limit)
 
 
 def get_course_outline(course: Course) -> dict:
@@ -422,8 +492,9 @@ def _fallback_answer(thread: CourseChatThread, question: str, contexts: list[dic
         answer = "Based on the course material, here is the most relevant extract:\n\n" + contexts[0]["text"][:900]
     else:
         answer = (
-            "I do not have course material for this question yet. Add text or upload a supported document. "
-            "A configured AI provider can still answer from general knowledge and will label that clearly."
+            "General knowledge: I could not find a matching indexed excerpt for this question, but you can still "
+            "study the unit outline and uploaded notes in this course. For concept questions, define the idea in "
+            "your own words, connect it to the unit topic, and check any examples in your course materials."
         )
 
     if has_history:
@@ -464,7 +535,11 @@ def _course_chat_agent(thread: CourseChatThread, retrieved_contexts: list[dict],
     @tool
     def retrieve_course_materials(query: str) -> str:
         """Search the vector database for course material relevant to the student's question."""
-        contexts = retrieve_course_context(thread.course, query, thread.unit)
+        try:
+            contexts = retrieve_course_context(thread.course, query, thread.unit)
+        except Exception:
+            logger.warning("Course material retrieval failed; continuing without vector context.", exc_info=True)
+            contexts = _material_text_context(thread.course, query, thread.unit)
         retrieved_contexts[:] = contexts
         return _format_contexts(contexts)
 
@@ -539,24 +614,47 @@ def _fallback_answer_chunks(answer: str):
 
 
 def answer_course_question(thread: CourseChatThread, question: str) -> CourseChatMessage:
-    has_history = thread.messages.exists()
-    CourseChatMessage.objects.create(thread=thread, role=CourseChatMessage.ROLE_USER, content=question)
+    try:
+        has_history = thread.messages.exists()
+        CourseChatMessage.objects.create(thread=thread, role=CourseChatMessage.ROLE_USER, content=question)
 
-    answer, contexts = _agent_answer(thread, question)
-    if not contexts:
+        answer, contexts = _agent_answer(thread, question)
+        if not contexts:
+            contexts = retrieve_course_context(thread.course, question, thread.unit)
+        citations = [item["metadata"] for item in contexts]
+        answer = answer or _fallback_answer(thread, question, contexts, has_history)
+
+        return CourseChatMessage.objects.create(
+            thread=thread,
+            role=CourseChatMessage.ROLE_ASSISTANT,
+            content=answer,
+            citations=citations,
+        )
+    except Exception:
+        logger.exception("Course chat failed; serving material-based fallback response.")
+        has_history = thread.messages.filter(role=CourseChatMessage.ROLE_USER).count() > 1
+        if not thread.messages.filter(role=CourseChatMessage.ROLE_USER, content=question).exists():
+            CourseChatMessage.objects.create(thread=thread, role=CourseChatMessage.ROLE_USER, content=question)
         contexts = retrieve_course_context(thread.course, question, thread.unit)
-    citations = [item["metadata"] for item in contexts]
-    answer = answer or _fallback_answer(thread, question, contexts, has_history)
-
-    return CourseChatMessage.objects.create(
-        thread=thread,
-        role=CourseChatMessage.ROLE_ASSISTANT,
-        content=answer,
-        citations=citations,
-    )
+        citations = [item["metadata"] for item in contexts]
+        answer = _fallback_answer(thread, question, contexts, has_history)
+        return CourseChatMessage.objects.create(
+            thread=thread,
+            role=CourseChatMessage.ROLE_ASSISTANT,
+            content=answer,
+            citations=citations,
+        )
 
 
 def stream_course_question_events(thread: CourseChatThread, question: str):
+    try:
+        yield from _stream_course_question_events(thread, question)
+    except Exception:
+        logger.exception("Course chat failed; serving material-based fallback response.")
+        yield from _stream_course_question_fallback(thread, question)
+
+
+def _stream_course_question_events(thread: CourseChatThread, question: str):
     has_history = thread.messages.exists()
     CourseChatMessage.objects.create(thread=thread, role=CourseChatMessage.ROLE_USER, content=question)
     yield {"event": "status", "message": "Searching course materials..."}
@@ -576,6 +674,34 @@ def stream_course_question_events(thread: CourseChatThread, question: str):
         for chunk in _fallback_answer_chunks(answer):
             answer_chunks.append(chunk)
             yield {"event": "token", "content": chunk}
+
+    message = CourseChatMessage.objects.create(
+        thread=thread,
+        role=CourseChatMessage.ROLE_ASSISTANT,
+        content="".join(answer_chunks).strip(),
+        citations=citations,
+    )
+    thread.save(update_fields=["updated_at"])
+    yield {
+        "event": "done",
+        "message_id": message.id,
+        "citations": citations,
+    }
+
+
+def _stream_course_question_fallback(thread: CourseChatThread, question: str):
+    has_history = thread.messages.filter(role=CourseChatMessage.ROLE_USER).count() > 1
+    if not thread.messages.filter(role=CourseChatMessage.ROLE_USER, content=question).exists():
+        CourseChatMessage.objects.create(thread=thread, role=CourseChatMessage.ROLE_USER, content=question)
+
+    yield {"event": "status", "message": "Answering from course materials..."}
+    contexts = retrieve_course_context(thread.course, question, thread.unit)
+    citations = [item["metadata"] for item in contexts]
+    answer = _fallback_answer(thread, question, contexts, has_history)
+    answer_chunks = []
+    for chunk in _fallback_answer_chunks(answer):
+        answer_chunks.append(chunk)
+        yield {"event": "token", "content": chunk}
 
     message = CourseChatMessage.objects.create(
         thread=thread,
